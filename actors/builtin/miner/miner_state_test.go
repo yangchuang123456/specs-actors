@@ -398,6 +398,33 @@ func TestPostSubmissionsBitfield(t *testing.T) {
 	})
 }
 
+func Test_VestingInfo(t *testing.T){
+	vestStart := abi.ChainEpoch(10)
+	vestSum := int64(100)
+	vspec:= &miner.VestSpec{
+		InitialDelay: 140,
+		VestPeriod:   140,
+		StepDuration: 20,
+		Quantization: 10,
+	}
+	//vepocs:= []int64{0, 0, 100, 0}
+
+	harness := constructStateHarness(t, abi.ChainEpoch(0))
+	harness.addLockedFunds(vestStart, abi.NewTokenAmount(vestSum), vspec)
+	assert.Equal(t, abi.NewTokenAmount(vestSum), harness.s.LockedFunds)
+
+/*	var totalVested int64
+	for e, v := range vepocs {
+		assert.Equal(t, abi.NewTokenAmount(v), harness.unlockVestedFunds(vestStart+abi.ChainEpoch(e)))
+		totalVested += v
+		assert.Equal(t, vestSum-totalVested, harness.s.LockedFunds.Int64())
+	}
+
+	assert.Equal(t, abi.NewTokenAmount(vestSum), abi.NewTokenAmount(totalVested))
+	assert.True(t, harness.vestingFundsStoreEmpty())
+	assert.Zero(t, harness.s.LockedFunds.Int64())*/
+}
+
 func TestVesting_AddLockedFunds_Table(t *testing.T) {
 	vestStart := abi.ChainEpoch(10)
 	vestSum := int64(100)
