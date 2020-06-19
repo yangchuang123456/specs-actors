@@ -26,16 +26,17 @@ import (
 // the storage interface, and mocks out side-effect-inducing calls.
 type Runtime struct {
 	// Execution context
-	ctx           context.Context
-	epoch         abi.ChainEpoch
-	receiver      addr.Address
-	caller        addr.Address
-	callerType    cid.Cid
-	miner         addr.Address
-	valueReceived abi.TokenAmount
-	idAddresses   map[addr.Address]addr.Address
-	actorCodeCIDs map[addr.Address]cid.Cid
-	newActorAddr  addr.Address
+	ctx               context.Context
+	epoch             abi.ChainEpoch
+	receiver          addr.Address
+	caller            addr.Address
+	callerType        cid.Cid
+	miner             addr.Address
+	valueReceived     abi.TokenAmount
+	idAddresses       map[addr.Address]addr.Address
+	actorCodeCIDs     map[addr.Address]cid.Cid
+	newActorAddr      addr.Address
+	circulatingSupply abi.TokenAmount
 
 	// Actor state
 	state   cid.Cid
@@ -221,6 +222,12 @@ func (rt *Runtime) GetRandomness(tag crypto.DomainSeparationTag, epoch abi.Chain
 	if len(rt.expectRandomness) == 0 {
 		rt.failTestNow("unexpected call to get randomness for tag %v, epoch %v", tag, epoch)
 	}
+
+	if epoch > rt.epoch {
+		rt.failTestNow("attempt to get randomness from future\n"+
+			"         requested epoch: %d greater than current epoch %d\n", epoch, rt.epoch)
+	}
+
 	exp := rt.expectRandomness[0]
 	if tag != exp.tag || epoch != exp.epoch || !bytes.Equal(entropy, exp.entropy) {
 		rt.failTest("unexpected get randomness\n"+
@@ -254,7 +261,7 @@ func (rt *Runtime) Send(toAddr addr.Address, methodNum abi.MethodNum, params run
 	exp := rt.expectSends[0]
 
 	if !exp.Equal(toAddr, methodNum, params, value) {
-		rt.failTest("unexpected send\n"+
+		rt.failTestNow("unexpected send\n"+
 			"          to: %s method: %d value: %v params: %v\n"+
 			"Expected  to: %s method: %d value: %v params: %v",
 			toAddr, methodNum, value, params, exp.to, exp.method, exp.value, exp.params)
@@ -306,6 +313,10 @@ func (rt *Runtime) DeleteActor(_ addr.Address) {
 		rt.Abortf(exitcode.SysErrorIllegalActor, "side-effect within transaction")
 	}
 	panic("implement me")
+}
+
+func (rt *Runtime) TotalFilCircSupply() abi.TokenAmount {
+	return rt.circulatingSupply
 }
 
 func (rt *Runtime) Abortf(errExitCode exitcode.ExitCode, msg string, args ...interface{}) {
@@ -440,7 +451,7 @@ func (rt *Runtime) HashBlake2b(data []byte) [32]byte {
 	return rt.hashfunc(data)
 }
 
-func (rt *Runtime) ComputeUnsealedSectorCID(reg abi.RegisteredProof, pieces []abi.PieceInfo) (cid.Cid, error) {
+func (rt *Runtime) ComputeUnsealedSectorCID(reg abi.RegisteredSealProof, pieces []abi.PieceInfo) (cid.Cid, error) {
 	panic("implement me")
 }
 
@@ -563,6 +574,10 @@ func (rt *Runtime) SetEpoch(epoch abi.ChainEpoch) {
 	rt.epoch = epoch
 }
 
+func (rt *Runtime) SetCirculatingSupply(amt abi.TokenAmount) {
+	rt.circulatingSupply = amt
+}
+
 func (rt *Runtime) AddIDAddress(src addr.Address, target addr.Address) {
 	rt.require(target.Protocol() == addr.ID, "target must use ID address protocol")
 	rt.idAddresses[src] = target
@@ -597,7 +612,10 @@ func (rt *Runtime) ExpectGetRandomness(tag crypto.DomainSeparationTag, epoch abi
 }
 
 func (rt *Runtime) ExpectSend(toAddr addr.Address, methodNum abi.MethodNum, params runtime.CBORMarshaler, value abi.TokenAmount, ret runtime.CBORMarshaler, exitCode exitcode.ExitCode) {
-	// append to the send queue
+	// Adapt nil to Empty as convenience for the caller (otherwise we would require non-nil here).
+	if ret == nil {
+		ret = adt.Empty
+	}
 	rt.expectSends = append(rt.expectSends, &expectedMessage{
 		to:         toAddr,
 		method:     methodNum,
@@ -793,9 +811,7 @@ func (rt *Runtime) failTestNow(msg string, args ...interface{}) {
 	rt.t.FailNow()
 }
 
-func (rt *Runtime) TotalFilCircSupply() abi.TokenAmount {
-	panic("todo crypto econ")
-}
+func (rt *Runtime) ChargeGas(_ string, _, _ int64) {}
 
 type ReturnWrapper struct {
 	V runtime.CBORMarshaler

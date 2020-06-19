@@ -52,6 +52,7 @@ type Runtime interface {
 	// Sends a message to another actor, returning the exit code and return value envelope.
 	// If the invoked method does not return successfully, its state changes (and that of any messages it sent in turn)
 	// will be rolled back.
+	// The result is never a bare nil, but may be (a wrapper of) adt.Empty.
 	Send(toAddr addr.Address, methodNum abi.MethodNum, params CBORMarshaler, value abi.TokenAmount) (SendReturn, exitcode.ExitCode)
 
 	// Halts execution upon an error from which the receiver cannot recover. The caller will receive the exitcode and
@@ -78,6 +79,14 @@ type Runtime interface {
 	// Provides the system call interface.
 	Syscalls() Syscalls
 
+	// Returns the total token supply in circulation at the beginning of the current epoch.
+	// The circulating supply is the sum of:
+	// - rewards emitted by the reward actor,
+	// - funds vested from lock-ups in the genesis state,
+	// less the sum of:
+	// - funds burnt,
+	// - pledge collateral locked in storage miner actors (recorded in the storage power actor)
+	// - deal collateral locked by the storage market actor
 	TotalFilCircSupply() abi.TokenAmount
 
 	// Provides a Go context for use by HAMT, etc.
@@ -87,6 +96,13 @@ type Runtime interface {
 
 	// Starts a new tracing span. The span must be End()ed explicitly, typically with a deferred invocation.
 	StartSpan(name string) TraceSpan
+
+	// ChargeGas charges specified amount of `gas` for execution.
+	// `name` provides information about gas charging point
+	// `virtual` sets virtual amount of gas to charge, this amount is not counted
+	// toward execution cost. This functionality is used for observing global changes
+	// in total gas charged if amount of gas charged was to be changed.
+	ChargeGas(name string, gas int64, virtual int64)
 }
 
 // Store defines the storage module exposed to actors.
@@ -116,7 +132,7 @@ type Syscalls interface {
 	// Hashes input data using blake2b with 256 bit output.
 	HashBlake2b(data []byte) [32]byte
 	// Computes an unsealed sector CID (CommD) from its constituent piece CIDs (CommPs) and sizes.
-	ComputeUnsealedSectorCID(reg abi.RegisteredProof, pieces []abi.PieceInfo) (cid.Cid, error)
+	ComputeUnsealedSectorCID(reg abi.RegisteredSealProof, pieces []abi.PieceInfo) (cid.Cid, error)
 	// Verifies a sector seal proof.
 	VerifySeal(vi abi.SealVerifyInfo) error
 

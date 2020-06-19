@@ -159,13 +159,13 @@ func (t *SectorInfo) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
-	if t.RegisteredProof >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.RegisteredProof))); err != nil {
+	// t.SealProof (abi.RegisteredSealProof) (int64)
+	if t.SealProof >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.SealProof))); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.RegisteredProof)-1)); err != nil {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.SealProof)-1)); err != nil {
 			return err
 		}
 	}
@@ -200,7 +200,7 @@ func (t *SectorInfo) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
+	// t.SealProof (abi.RegisteredSealProof) (int64)
 	{
 		maj, extra, err := cbg.CborReadHeader(br)
 		var extraI int64
@@ -223,7 +223,7 @@ func (t *SectorInfo) UnmarshalCBOR(r io.Reader) error {
 			return fmt.Errorf("wrong type for int64 field: %d", maj)
 		}
 
-		t.RegisteredProof = RegisteredProof(extraI)
+		t.SealProof = RegisteredSealProof(extraI)
 	}
 	// t.SectorNumber (abi.SectorNumber) (uint64)
 
@@ -263,13 +263,13 @@ func (t *SealVerifyInfo) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
-	if t.RegisteredProof >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.RegisteredProof))); err != nil {
+	// t.SealProof (abi.RegisteredSealProof) (int64)
+	if t.SealProof >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.SealProof))); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.RegisteredProof)-1)); err != nil {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.SealProof)-1)); err != nil {
 			return err
 		}
 	}
@@ -359,7 +359,7 @@ func (t *SealVerifyInfo) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
+	// t.SealProof (abi.RegisteredSealProof) (int64)
 	{
 		maj, extra, err := cbg.CborReadHeader(br)
 		var extraI int64
@@ -382,7 +382,7 @@ func (t *SealVerifyInfo) UnmarshalCBOR(r io.Reader) error {
 			return fmt.Errorf("wrong type for int64 field: %d", maj)
 		}
 
-		t.RegisteredProof = RegisteredProof(extraI)
+		t.SealProof = RegisteredSealProof(extraI)
 	}
 	// t.SectorID (abi.SectorID) (struct)
 
@@ -513,13 +513,13 @@ func (t *PoStProof) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
-	if t.RegisteredProof >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.RegisteredProof))); err != nil {
+	// t.PoStProof (abi.RegisteredPoStProof) (int64)
+	if t.PoStProof >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.PoStProof))); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.RegisteredProof)-1)); err != nil {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.PoStProof)-1)); err != nil {
 			return err
 		}
 	}
@@ -553,7 +553,7 @@ func (t *PoStProof) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.RegisteredProof (abi.RegisteredProof) (int64)
+	// t.PoStProof (abi.RegisteredPoStProof) (int64)
 	{
 		maj, extra, err := cbg.CborReadHeader(br)
 		var extraI int64
@@ -576,7 +576,7 @@ func (t *PoStProof) UnmarshalCBOR(r io.Reader) error {
 			return fmt.Errorf("wrong type for int64 field: %d", maj)
 		}
 
-		t.RegisteredProof = RegisteredProof(extraI)
+		t.PoStProof = RegisteredPoStProof(extraI)
 	}
 	// t.ProofBytes ([]uint8) (slice)
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	addr "github.com/filecoin-project/go-address"
-	peer "github.com/libp2p/go-libp2p-core/peer"
 	errors "github.com/pkg/errors"
 	xerrors "golang.org/x/xerrors"
 
@@ -37,16 +36,13 @@ func (a Actor) Exports() []interface{} {
 		builtin.MethodConstructor: a.Constructor,
 		2:                         a.CreateMiner,
 		3:                         a.DeleteMiner,
-		4:                         a.OnSectorProveCommit,
-		5:                         a.OnSectorTerminate,
-		6:                         a.OnFaultBegin,
-		7:                         a.OnFaultEnd,
-		8:                         a.OnSectorModifyWeightDesc,
-		9:                         a.EnrollCronEvent,
-		10:                        a.OnEpochTickEnd,
-		11:                        a.UpdatePledgeTotal,
-		12:                        a.OnConsensusFault,
-		13:                        a.SubmitPoRepForBulkVerify,
+		4:                         a.UpdateClaimedPower,
+		5:                         a.EnrollCronEvent,
+		6:                         a.OnEpochTickEnd,
+		7:                         a.UpdatePledgeTotal,
+		8:                         a.OnConsensusFault,
+		9:                         a.SubmitPoRepForBulkVerify,
+		10:                        a.CurrentTotalPower,
 	}
 }
 
@@ -57,8 +53,9 @@ var _ abi.Invokee = Actor{}
 type MinerConstructorParams struct {
 	OwnerAddr     addr.Address
 	WorkerAddr    addr.Address
-	SealProofType abi.RegisteredProof
-	PeerId        peer.ID
+	SealProofType abi.RegisteredSealProof
+	PeerId        abi.PeerID
+	Multiaddrs    []abi.Multiaddrs
 }
 
 type SectorStorageWeightDesc struct {
@@ -92,8 +89,9 @@ func (a Actor) Constructor(rt Runtime, _ *adt.EmptyValue) *adt.EmptyValue {
 type CreateMinerParams struct {
 	Owner         addr.Address
 	Worker        addr.Address
-	SealProofType abi.RegisteredProof
-	Peer          peer.ID
+	SealProofType abi.RegisteredSealProof
+	Peer          abi.PeerID
+	Multiaddrs    []abi.Multiaddrs
 }
 
 type CreateMinerReturn struct {
@@ -109,6 +107,7 @@ func (a Actor) CreateMiner(rt Runtime, params *CreateMinerParams) *CreateMinerRe
 		WorkerAddr:    params.Worker,
 		SealProofType: params.SealProofType,
 		PeerId:        params.Peer,
+		Multiaddrs:    params.Multiaddrs,
 	}
 	ctorParamBuf := new(bytes.Buffer)
 	err := ctorParams.MarshalCBOR(ctorParamBuf)
@@ -164,7 +163,7 @@ func (a Actor) DeleteMiner(rt Runtime, params *DeleteMinerParams) *adt.EmptyValu
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 
-		claim, found, err := st.getClaim(adt.AsStore(rt), nominal)
+		claim, found, err := st.GetClaim(adt.AsStore(rt), nominal)
 		if err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to load miner claim for deletion: %v", err)
 		}
@@ -189,118 +188,24 @@ func (a Actor) DeleteMiner(rt Runtime, params *DeleteMinerParams) *adt.EmptyValu
 	return nil
 }
 
-type OnSectorProveCommitParams struct {
-	Weight SectorStorageWeightDesc
+type UpdateClaimedPowerParams struct {
+	RawByteDelta         abi.StoragePower
+	QualityAdjustedDelta abi.StoragePower
 }
 
-// Returns the initial pledge collateral requirement.
-func (a Actor) OnSectorProveCommit(rt Runtime, params *OnSectorProveCommitParams) *abi.TokenAmount {
-	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
-	initialPledge := a.computeInitialPledge(rt, &params.Weight)
-	var st State
-	rt.State().Transaction(&st, func() interface{} {
-		rbpower := big.NewIntUnsigned(uint64(params.Weight.SectorSize))
-		qapower := QAPowerForWeight(&params.Weight)
-
-		err := st.AddToClaim(adt.AsStore(rt), rt.Message().Caller(), rbpower, qapower)
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "Failed to add power for sector: %v", err)
-		}
-
-		return nil
-	})
-
-	return &initialPledge
-}
-
-type OnSectorTerminateParams struct {
-	TerminationType SectorTermination
-	Weights         []SectorStorageWeightDesc // TODO: replace with power if it can be computed by miner
-}
-
-func (a Actor) OnSectorTerminate(rt Runtime, params *OnSectorTerminateParams) *adt.EmptyValue {
+// Adds or removes claimed power for the calling actor.
+// May only be invoked by a miner actor.
+func (a Actor) UpdateClaimedPower(rt Runtime, params *UpdateClaimedPowerParams) *adt.EmptyValue {
 	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
 	minerAddr := rt.Message().Caller()
 
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
-		rbpower, qapower := powersForWeights(params.Weights)
-		err := st.AddToClaim(adt.AsStore(rt), minerAddr, rbpower.Neg(), qapower.Neg())
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "failed to deduct claimed power for sector: %v", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-type OnFaultBeginParams struct {
-	Weights []SectorStorageWeightDesc // TODO: replace with power if it can be computed by miner
-}
-
-func (a Actor) OnFaultBegin(rt Runtime, params *OnFaultBeginParams) *adt.EmptyValue {
-	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
-	var st State
-	rt.State().Transaction(&st, func() interface{} {
-		rbpower, qapower := powersForWeights(params.Weights)
-		err := st.AddToClaim(adt.AsStore(rt), rt.Message().Caller(), rbpower.Neg(), qapower.Neg())
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "failed to deduct claimed power for sector: %v", err)
-		}
+		err := st.AddToClaim(adt.AsStore(rt), minerAddr, params.RawByteDelta, params.QualityAdjustedDelta)
+		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to update power raw %s, qa %s", params.RawByteDelta, params.QualityAdjustedDelta)
 		return nil
 	})
 	return nil
-}
-
-type OnFaultEndParams struct {
-	Weights []SectorStorageWeightDesc // TODO: replace with power if it can be computed by miner
-}
-
-func (a Actor) OnFaultEnd(rt Runtime, params *OnFaultEndParams) *adt.EmptyValue {
-	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
-
-	var st State
-	rt.State().Transaction(&st, func() interface{} {
-		rbpower, qapower := powersForWeights(params.Weights)
-		err := st.AddToClaim(adt.AsStore(rt), rt.Message().Caller(), rbpower, qapower)
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "failed to add claimed power for sector: %v", err)
-		}
-		return nil
-	})
-
-	return nil
-}
-
-type OnSectorModifyWeightDescParams struct {
-	PrevWeight SectorStorageWeightDesc // TODO: replace with power if it can be computed by miner
-	NewWeight  SectorStorageWeightDesc
-}
-
-// Returns new initial pledge, now committed in place of the old.
-func (a Actor) OnSectorModifyWeightDesc(rt Runtime, params *OnSectorModifyWeightDescParams) *abi.TokenAmount {
-	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
-	newInitialPledge := a.computeInitialPledge(rt, &params.NewWeight)
-
-	var st State
-	rt.State().Transaction(&st, func() interface{} {
-		prevPower := QAPowerForWeight(&params.PrevWeight)
-		err := st.AddToClaim(adt.AsStore(rt), rt.Message().Caller(), big.NewIntUnsigned(uint64(params.PrevWeight.SectorSize)).Neg(), prevPower.Neg())
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "failed to deduct claimed power for sector: %v", err)
-		}
-
-		newPower := QAPowerForWeight(&params.NewWeight)
-		err = st.AddToClaim(adt.AsStore(rt), rt.Message().Caller(), big.NewIntUnsigned(uint64(params.NewWeight.SectorSize)), newPower)
-		if err != nil {
-			rt.Abortf(exitcode.ErrIllegalState, "failed to add power for sector: %v", err)
-		}
-
-		return nil
-	})
-
-	return &newInitialPledge
 }
 
 type EnrollCronEventParams struct {
@@ -370,7 +275,7 @@ func (a Actor) OnConsensusFault(rt Runtime, pledgeAmount *abi.TokenAmount) *adt.
 
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
-		claim, powerOk, err := st.getClaim(adt.AsStore(rt), minerAddr)
+		claim, powerOk, err := st.GetClaim(adt.AsStore(rt), minerAddr)
 		if err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to read claimed power for fault: %v", err)
 		}
@@ -399,6 +304,7 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 	minerAddr := rt.Message().Caller()
 
 	// TODO: charge a LOT of gas
+	// https://github.com/filecoin-project/specs-actors/issues/442
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		store := adt.AsStore(rt)
@@ -428,26 +334,28 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 	return nil
 }
 
+type CurrentTotalPowerReturn struct {
+	RawBytePower     abi.StoragePower
+	QualityAdjPower  abi.StoragePower
+	PledgeCollateral abi.TokenAmount
+}
+
+// Returns the total power and pledge recorded by the power actor.
+// TODO hold these values constant during an epoch for stable calculations, https://github.com/filecoin-project/specs-actors/issues/495
+func (a Actor) CurrentTotalPower(rt Runtime, _ *adt.EmptyValue) *CurrentTotalPowerReturn {
+	rt.ValidateImmediateCallerAcceptAny()
+	var st State
+	rt.State().Readonly(&st)
+	return &CurrentTotalPowerReturn{
+		RawBytePower:     st.TotalRawBytePower,
+		QualityAdjPower:  st.TotalQualityAdjPower,
+		PledgeCollateral: st.TotalPledgeCollateral,
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Method utility functions
 ////////////////////////////////////////////////////////////////////////////////
-
-func (a Actor) computeInitialPledge(rt Runtime, desc *SectorStorageWeightDesc) abi.TokenAmount {
-	var st State
-	rt.State().Readonly(&st)
-
-	rwret, code := rt.Send(builtin.RewardActorAddr, builtin.MethodsReward.LastPerEpochReward, nil, big.Zero())
-	builtin.RequireSuccess(rt, code, "failed to check epoch reward")
-	epochReward := abi.NewTokenAmount(0)
-	if err := rwret.Into(&epochReward); err != nil {
-		rt.Abortf(exitcode.ErrIllegalState, "failed to unmarshal epoch reward value: %s", err)
-	}
-
-	qapower := QAPowerForWeight(desc)
-	initialPledge := InitialPledgeForWeight(qapower, st.TotalQualityAdjPower, rt.TotalFilCircSupply(), st.TotalPledgeCollateral, epochReward)
-
-	return initialPledge
-}
 
 func (a Actor) processBatchProofVerifies(rt Runtime) error {
 	var st State
@@ -507,21 +415,29 @@ func (a Actor) processBatchProofVerifies(rt Runtime) error {
 
 		verifs := verifies[m]
 
+		seen := map[abi.SectorNumber]struct{}{}
 		var successful []abi.SectorNumber
 		for i, r := range vres {
 			if r {
-				successful = append(successful, verifs[i].SectorID.Number)
+				snum := verifs[i].SectorID.Number
+
+				if _, exists := seen[snum]; exists {
+					// filter-out duplicates
+					continue
+				}
+
+				seen[snum] = struct{}{}
+				successful = append(successful, snum)
 			}
 		}
 
-		ret, code := rt.Send(
+		// The exit code is explicitly ignored
+		_, _ = rt.Send(
 			m,
 			builtin.MethodsMiner.ConfirmSectorProofsValid,
-			&builtin.ConfirmSectorProofsParams{successful},
+			&builtin.ConfirmSectorProofsParams{Sectors: successful},
 			abi.NewTokenAmount(0),
 		)
-		builtin.RequireSuccess(rt, code, "failed to confirm sector proofs valid") // should never happen...
-		_ = ret
 	}
 
 	return nil
@@ -580,17 +496,6 @@ func (a Actor) deleteMinerActor(rt Runtime, miner addr.Address) error {
 		return nil
 	}).(error)
 	return err
-}
-
-func powersForWeights(weights []SectorStorageWeightDesc) (abi.StoragePower, abi.StoragePower) {
-	// returns (rbpower, qapower)
-	rbpower := big.Zero()
-	qapower := big.Zero()
-	for i := range weights {
-		rbpower = big.Add(rbpower, big.NewIntUnsigned(uint64(weights[i].SectorSize)))
-		qapower = big.Add(qapower, QAPowerForWeight(&weights[i]))
-	}
-	return rbpower, qapower
 }
 
 func abortIfError(rt Runtime, err error, msg string, args ...interface{}) {

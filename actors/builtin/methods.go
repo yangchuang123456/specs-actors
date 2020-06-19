@@ -9,6 +9,7 @@ const (
 	MethodConstructor = abi.MethodNum(1)
 
 	// TODO fin: remove this once canonical method numbers are finalized
+	// https://github.com/filecoin-project/specs-actors/issues/461
 	MethodPlaceholder = abi.MethodNum(1 << 30)
 )
 
@@ -67,17 +68,14 @@ var MethodsPower = struct {
 	Constructor              abi.MethodNum
 	CreateMiner              abi.MethodNum
 	DeleteMiner              abi.MethodNum
-	OnSectorProveCommit      abi.MethodNum
-	OnSectorTerminate        abi.MethodNum
-	OnFaultBegin             abi.MethodNum
-	OnFaultEnd               abi.MethodNum
-	OnSectorModifyWeightDesc abi.MethodNum
+	UpdateClaimedPower       abi.MethodNum
 	EnrollCronEvent          abi.MethodNum
 	OnEpochTickEnd           abi.MethodNum
 	UpdatePledgeTotal        abi.MethodNum
 	OnConsensusFault         abi.MethodNum
 	SubmitPoRepForBulkVerify abi.MethodNum
-}{MethodConstructor, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
+	CurrentTotalPower        abi.MethodNum
+}{MethodConstructor, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 var MethodsMiner = struct {
 	Constructor              abi.MethodNum

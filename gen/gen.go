@@ -98,6 +98,9 @@ func main() {
 		multisig.TxnIDParams{},
 		multisig.ChangeNumApprovalsThresholdParams{},
 		multisig.SwapSignerParams{},
+		// method returns
+		multisig.ApproveReturn{},
+		multisig.ProposeReturn{},
 	); err != nil {
 		panic(err)
 	}
@@ -126,13 +129,10 @@ func main() {
 		power.CreateMinerParams{},
 		power.DeleteMinerParams{},
 		power.EnrollCronEventParams{},
-		power.OnSectorTerminateParams{},
-		power.OnSectorModifyWeightDescParams{},
-		power.OnSectorProveCommitParams{},
-		power.OnFaultBeginParams{},
-		power.OnFaultEndParams{},
+		power.UpdateClaimedPowerParams{},
 		// method returns
 		power.CreateMinerReturn{},
+		power.CurrentTotalPowerReturn{},
 		// other types
 		power.MinerConstructorParams{},
 		power.SectorStorageWeightDesc{},
@@ -175,6 +175,7 @@ func main() {
 		miner.SubmitWindowedPoStParams{},
 		miner.TerminateSectorsParams{},
 		miner.ChangePeerIDParams{},
+		miner.ChangeMultiaddrsParams{},
 		miner.ProveCommitSectorParams{},
 		miner.ChangeWorkerAddressParams{},
 		miner.ExtendSectorExpirationParams{},

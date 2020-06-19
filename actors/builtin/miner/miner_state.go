@@ -2,21 +2,18 @@ package miner
 
 import (
 	"fmt"
-	"io"
 	"log"
+
 	"reflect"
 
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-bitfield"
 	cid "github.com/ipfs/go-cid"
-	peer "github.com/libp2p/go-libp2p-core/peer"
 	errors "github.com/pkg/errors"
-	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
-	power "github.com/filecoin-project/specs-actors/actors/builtin/power"
 	. "github.com/filecoin-project/specs-actors/actors/util"
 	adt "github.com/filecoin-project/specs-actors/actors/util/adt"
 )
@@ -28,6 +25,7 @@ import (
 type State struct {
 	// Information not related to sectors.
 	// TODO: this should be a cid of the miner Info struct so it's not re-written when other fields change.
+	// https://github.com/filecoin-project/specs-actors/issues/422
 	Info MinerInfo
 
 	PreCommitDeposits abi.TokenAmount // Total funds locked as PreCommitDeposits
@@ -99,11 +97,14 @@ type MinerInfo struct {
 
 	PendingWorkerKey *WorkerKeyChange
 
-	// Libp2p identity that should be used when connecting to this miner.
-	PeerId peer.ID
+	// Byte array representing a Libp2p identity that should be used when connecting to this miner.
+	PeerId abi.PeerID
+
+	// Slice of byte arrays representing Libp2p multi-addresses used for establishing a connection with this miner.
+	Multiaddrs []abi.Multiaddrs
 
 	// The proof type used by this miner for sealing sectors.
-	SealProofType abi.RegisteredProof
+	SealProofType abi.RegisteredSealProof
 
 	// Amount of space in each sector committed by this miner.
 	// This is computed from the proof type and represented here redundantly.
@@ -114,20 +115,18 @@ type MinerInfo struct {
 	WindowPoStPartitionSectors uint64
 }
 
-type PeerID peer.ID
-
 type WorkerKeyChange struct {
 	NewWorker   addr.Address // Must be an ID address
 	EffectiveAt abi.ChainEpoch
 }
 
 type SectorPreCommitInfo struct {
-	RegisteredProof abi.RegisteredProof
-	SectorNumber    abi.SectorNumber
-	SealedCID       cid.Cid // CommR
-	SealRandEpoch   abi.ChainEpoch
-	DealIDs         []abi.DealID
-	Expiration      abi.ChainEpoch // Sector Expiration
+	SealProof     abi.RegisteredSealProof
+	SectorNumber  abi.SectorNumber
+	SealedCID     cid.Cid // CommR
+	SealRandEpoch abi.ChainEpoch
+	DealIDs       []abi.DealID
+	Expiration    abi.ChainEpoch // Sector Expiration
 }
 
 type SectorPreCommitOnChainInfo struct {
@@ -144,11 +143,7 @@ type SectorOnChainInfo struct {
 }
 
 func ConstructState(emptyArrayCid, emptyMapCid, emptyDeadlinesCid cid.Cid, ownerAddr, workerAddr addr.Address,
-	peerId peer.ID, proofType abi.RegisteredProof, periodStart abi.ChainEpoch) (*State, error) {
-	sealProofType, err := proofType.RegisteredSealProof()
-	if err != nil {
-		return nil, fmt.Errorf("no seal proof for proof type %d: %w", sealProofType, err)
-	}
+	peerId abi.PeerID, multiaddrs []abi.Multiaddrs, sealProofType abi.RegisteredSealProof, periodStart abi.ChainEpoch) (*State, error) {
 	sectorSize, err := sealProofType.SectorSize()
 	if err != nil {
 		return nil, fmt.Errorf("no sector size for seal proof type %d: %w", sealProofType, err)
@@ -163,6 +158,7 @@ func ConstructState(emptyArrayCid, emptyMapCid, emptyDeadlinesCid cid.Cid, owner
 			Worker:                     workerAddr,
 			PendingWorkerKey:           nil,
 			PeerId:                     peerId,
+			Multiaddrs:                 multiaddrs,
 			SealProofType:              sealProofType,
 			SectorSize:                 sectorSize,
 			WindowPoStPartitionSectors: partitionSectors,
@@ -380,9 +376,14 @@ func (st *State) ForEachSectorExpiration(store adt.Store, f func(expiry abi.Chai
 		return err
 	}
 
-	bf := abi.NewBitField()
-	return arr.ForEach(bf, func(i int64) error {
-		return f(abi.ChainEpoch(i), bf)
+	var bf bitfield.BitField
+	empty := abi.NewBitField()
+	return arr.ForEach(&bf, func(i int64) error {
+		bfCopy, err := bitfield.MergeBitFields(&bf, empty)
+		if err != nil {
+			return err
+		}
+		return f(abi.ChainEpoch(i), bfCopy)
 	})
 }
 
@@ -422,6 +423,10 @@ func (st *State) AddSectorExpirations(store adt.Store, expiry abi.ChainEpoch, se
 
 // Removes some sector numbers from the set expiring at an epoch.
 func (st *State) RemoveSectorExpirations(store adt.Store, expiry abi.ChainEpoch, sectors ...uint64) error {
+	if len(sectors) == 0 {
+		return nil
+	}
+
 	arr, err := adt.AsArray(store, st.SectorExpirations)
 	if err != nil {
 		return err
@@ -438,7 +443,13 @@ func (st *State) RemoveSectorExpirations(store adt.Store, expiry abi.ChainEpoch,
 		return err
 	}
 
-	if err = arr.Set(uint64(expiry), bf); err != nil {
+	if empty, err := bf.IsEmpty(); err != nil {
+		return err
+	} else if empty {
+		if err := arr.Delete(uint64(expiry)); err != nil {
+			return err
+		}
+	} else if err = arr.Set(uint64(expiry), bf); err != nil {
 		return err
 	}
 
@@ -520,18 +531,17 @@ func (st *State) AddFaults(store adt.Store, sectorNos *abi.BitField, faultEpoch 
 }
 
 // Removes sector numbers from faults and fault epochs, if present.
-func (st *State) RemoveFaults(store adt.Store, sectorNos *abi.BitField) (err error) {
-	empty, err := sectorNos.IsEmpty()
-	if err != nil {
+func (st *State) RemoveFaults(store adt.Store, sectorNos *abi.BitField) error {
+	if empty, err := sectorNos.IsEmpty(); err != nil {
 		return err
-	}
-	if empty {
+	} else if empty {
 		return nil
 	}
 
-	st.Faults, err = bitfield.SubtractBitField(st.Faults, sectorNos)
-	if err != nil {
+	if newFaults, err := bitfield.SubtractBitField(st.Faults, sectorNos); err != nil {
 		return err
+	} else {
+		st.Faults = newFaults
 	}
 
 	arr, err := adt.AsArray(store, st.FaultEpochs)
@@ -539,27 +549,27 @@ func (st *State) RemoveFaults(store adt.Store, sectorNos *abi.BitField) (err err
 		return err
 	}
 
-	changed := map[uint64]*abi.BitField{}
+	epochsChanged := map[uint64]*abi.BitField{}
 
-	bf1 := &abi.BitField{}
-	err = arr.ForEach(bf1, func(i int64) error {
-		c1, err := bf1.Count()
+	epochFaultsOld := &abi.BitField{}
+	err = arr.ForEach(epochFaultsOld, func(i int64) error {
+		countOld, err := epochFaultsOld.Count()
 		if err != nil {
 			return err
 		}
 
-		bf2, err := bitfield.SubtractBitField(bf1, sectorNos)
+		epochFaultsNew, err := bitfield.SubtractBitField(epochFaultsOld, sectorNos)
 		if err != nil {
 			return err
 		}
 
-		c2, err := bf2.Count()
+		countNew, err := epochFaultsNew.Count()
 		if err != nil {
 			return err
 		}
 
-		if c1 != c2 {
-			changed[uint64(i)] = bf2
+		if countOld != countNew {
+			epochsChanged[uint64(i)] = epochFaultsNew
 		}
 
 		return nil
@@ -568,8 +578,14 @@ func (st *State) RemoveFaults(store adt.Store, sectorNos *abi.BitField) (err err
 		return err
 	}
 
-	for i, field := range changed {
-		if err = arr.Set(i, field); err != nil {
+	for i, newFaults := range epochsChanged {
+		if empty, err := newFaults.IsEmpty(); err != nil {
+			return err
+		} else if empty {
+			if err := arr.Delete(i); err != nil {
+				return err
+			}
+		} else if err = arr.Set(i, newFaults); err != nil {
 			return err
 		}
 	}
@@ -585,9 +601,14 @@ func (st *State) ForEachFaultEpoch(store adt.Store, cb func(epoch abi.ChainEpoch
 		return err
 	}
 
-	bf := abi.NewBitField()
-	return arr.ForEach(bf, func(i int64) error {
-		return cb(abi.ChainEpoch(i), bf)
+	var bf bitfield.BitField
+	empty := abi.NewBitField()
+	return arr.ForEach(&bf, func(i int64) error {
+		bfCopy, err := bitfield.MergeBitFields(&bf, empty)
+		if err != nil {
+			return err
+		}
+		return cb(abi.ChainEpoch(i), bfCopy)
 	})
 }
 
@@ -845,7 +866,7 @@ func (st *State) AddLockedFunds(store adt.Store, currEpoch abi.ChainEpoch, vesti
 		vestEpoch := quantizeUp(e, spec.Quantization)
 		elapsed := vestEpoch - vestBegin
 
-		targetVest := big.Zero()
+		targetVest := big.Zero() //nolint:ineffassign
 		if elapsed < spec.VestPeriod {
 			// Linear vesting, PARAM_FINISH
 			targetVest = big.Div(big.Mul(vestingSum, big.NewInt(int64(elapsed))), vestPeriod)
@@ -1036,18 +1057,9 @@ func (st *State) AssertBalanceInvariants(balance abi.TokenAmount) {
 
 func (s *SectorOnChainInfo) AsSectorInfo() abi.SectorInfo {
 	return abi.SectorInfo{
-		RegisteredProof: s.Info.RegisteredProof,
-		SectorNumber:    s.Info.SectorNumber,
-		SealedCID:       s.Info.SealedCID,
-	}
-}
-
-func AsStorageWeightDesc(sectorSize abi.SectorSize, sectorInfo *SectorOnChainInfo) *power.SectorStorageWeightDesc {
-	return &power.SectorStorageWeightDesc{
-		SectorSize:         sectorSize,
-		DealWeight:         sectorInfo.DealWeight,
-		VerifiedDealWeight: sectorInfo.VerifiedDealWeight,
-		Duration:           sectorInfo.Info.Expiration - sectorInfo.ActivationEpoch,
+		SealProof:    s.Info.SealProof,
+		SectorNumber: s.Info.SectorNumber,
+		SealedCID:    s.Info.SealedCID,
 	}
 }
 
@@ -1076,16 +1088,6 @@ func quantizeUp(e abi.ChainEpoch, unit abi.ChainEpoch) abi.ChainEpoch {
 	return e - remainder + unit
 }
 
-// Rounds e to the nearest exact multiple of the quantization unit, rounding down.
-// Precondition: unit >= 0 else behaviour is undefined
-func quantizeDown(e abi.ChainEpoch, unit abi.ChainEpoch) abi.ChainEpoch {
-	remainder := e % unit
-	if remainder == 0 {
-		return e
-	}
-	return e - remainder
-}
-
 func SectorKey(e abi.SectorNumber) adt.Keyer {
 	return adt.UIntKey(uint64(e))
 }
@@ -1100,38 +1102,4 @@ func init() {
 	if reflect.TypeOf(e).Kind() != reflect.Uint64 {
 		panic("incorrect sector number encoding")
 	}
-}
-
-func (p *PeerID) MarshalCBOR(w io.Writer) error {
-	if err := cbg.CborWriteHeader(w, cbg.MajByteString, uint64(len([]byte(*p)))); err != nil {
-		return err
-	}
-	if _, err := w.Write([]byte(*p)); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *PeerID) UnmarshalCBOR(r io.Reader) error {
-	t, l, err := cbg.CborReadHeader(r)
-	if err != nil {
-		return err
-	}
-
-	if t != cbg.MajByteString {
-		return fmt.Errorf("expected MajByteString when reading peer ID, got %d instead", t)
-	}
-
-	if l > cbg.MaxLength {
-		return fmt.Errorf("peer ID in input was too long")
-	}
-
-	buf := make([]byte, l)
-	_, err = io.ReadFull(r, buf)
-	if err != nil {
-		return fmt.Errorf("failed to read full peer ID: %w", err)
-	}
-
-	*p = PeerID(buf)
-	return nil
 }

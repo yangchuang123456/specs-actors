@@ -8,6 +8,7 @@ import (
 
 	address "github.com/filecoin-project/go-address"
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
+	exitcode "github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
 	cbg "github.com/whyrusleeping/cbor-gen"
 	xerrors "golang.org/x/xerrors"
 )
@@ -37,15 +38,10 @@ func (t *State) MarshalCBOR(w io.Writer) error {
 		}
 	}
 
-	// t.NumApprovalsThreshold (int64) (int64)
-	if t.NumApprovalsThreshold >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NumApprovalsThreshold))); err != nil {
-			return err
-		}
-	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.NumApprovalsThreshold)-1)); err != nil {
-			return err
-		}
+	// t.NumApprovalsThreshold (uint64) (uint64)
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NumApprovalsThreshold))); err != nil {
+		return err
 	}
 
 	// t.NextTxnID (multisig.TxnID) (int64)
@@ -139,30 +135,19 @@ func (t *State) UnmarshalCBOR(r io.Reader) error {
 		t.Signers[i] = v
 	}
 
-	// t.NumApprovalsThreshold (int64) (int64)
+	// t.NumApprovalsThreshold (uint64) (uint64)
+
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
-		var extraI int64
+
+		maj, extra, err = cbg.CborReadHeader(br)
 		if err != nil {
 			return err
 		}
-		switch maj {
-		case cbg.MajUnsignedInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 positive overflow")
-			}
-		case cbg.MajNegativeInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 negative oveflow")
-			}
-			extraI = -1 - extraI
-		default:
-			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		if maj != cbg.MajUnsignedInt {
+			return fmt.Errorf("wrong type for uint64 field")
 		}
+		t.NumApprovalsThreshold = uint64(extra)
 
-		t.NumApprovalsThreshold = int64(extraI)
 	}
 	// t.NextTxnID (multisig.TxnID) (int64)
 	{
@@ -555,15 +540,10 @@ func (t *ConstructorParams) MarshalCBOR(w io.Writer) error {
 		}
 	}
 
-	// t.NumApprovalsThreshold (int64) (int64)
-	if t.NumApprovalsThreshold >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NumApprovalsThreshold))); err != nil {
-			return err
-		}
-	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.NumApprovalsThreshold)-1)); err != nil {
-			return err
-		}
+	// t.NumApprovalsThreshold (uint64) (uint64)
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NumApprovalsThreshold))); err != nil {
+		return err
 	}
 
 	// t.UnlockDuration (abi.ChainEpoch) (int64)
@@ -623,30 +603,19 @@ func (t *ConstructorParams) UnmarshalCBOR(r io.Reader) error {
 		t.Signers[i] = v
 	}
 
-	// t.NumApprovalsThreshold (int64) (int64)
+	// t.NumApprovalsThreshold (uint64) (uint64)
+
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
-		var extraI int64
+
+		maj, extra, err = cbg.CborReadHeader(br)
 		if err != nil {
 			return err
 		}
-		switch maj {
-		case cbg.MajUnsignedInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 positive overflow")
-			}
-		case cbg.MajNegativeInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 negative oveflow")
-			}
-			extraI = -1 - extraI
-		default:
-			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		if maj != cbg.MajUnsignedInt {
+			return fmt.Errorf("wrong type for uint64 field")
 		}
+		t.NumApprovalsThreshold = uint64(extra)
 
-		t.NumApprovalsThreshold = int64(extraI)
 	}
 	// t.UnlockDuration (abi.ChainEpoch) (int64)
 	{
@@ -1015,16 +984,12 @@ func (t *ChangeNumApprovalsThresholdParams) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
-	// t.NewThreshold (int64) (int64)
-	if t.NewThreshold >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NewThreshold))); err != nil {
-			return err
-		}
-	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.NewThreshold)-1)); err != nil {
-			return err
-		}
+	// t.NewThreshold (uint64) (uint64)
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.NewThreshold))); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -1043,30 +1008,19 @@ func (t *ChangeNumApprovalsThresholdParams) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
-	// t.NewThreshold (int64) (int64)
+	// t.NewThreshold (uint64) (uint64)
+
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
-		var extraI int64
+
+		maj, extra, err = cbg.CborReadHeader(br)
 		if err != nil {
 			return err
 		}
-		switch maj {
-		case cbg.MajUnsignedInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 positive overflow")
-			}
-		case cbg.MajNegativeInt:
-			extraI = int64(extra)
-			if extraI < 0 {
-				return fmt.Errorf("int64 negative oveflow")
-			}
-			extraI = -1 - extraI
-		default:
-			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		if maj != cbg.MajUnsignedInt {
+			return fmt.Errorf("wrong type for uint64 field")
 		}
+		t.NewThreshold = uint64(extra)
 
-		t.NewThreshold = int64(extraI)
 	}
 	return nil
 }
@@ -1124,6 +1078,274 @@ func (t *SwapSignerParams) UnmarshalCBOR(r io.Reader) error {
 			return xerrors.Errorf("unmarshaling t.To: %w", err)
 		}
 
+	}
+	return nil
+}
+
+func (t *ApproveReturn) MarshalCBOR(w io.Writer) error {
+	if t == nil {
+		_, err := w.Write(cbg.CborNull)
+		return err
+	}
+	if _, err := w.Write([]byte{131}); err != nil {
+		return err
+	}
+
+	// t.Applied (bool) (bool)
+	if err := cbg.WriteBool(w, t.Applied); err != nil {
+		return err
+	}
+
+	// t.Code (exitcode.ExitCode) (int64)
+	if t.Code >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.Code))); err != nil {
+			return err
+		}
+	} else {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.Code)-1)); err != nil {
+			return err
+		}
+	}
+
+	// t.Ret (runtime.CBORBytes) (slice)
+	if len(t.Ret) > cbg.ByteArrayMaxLen {
+		return xerrors.Errorf("Byte array in field t.Ret was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajByteString, uint64(len(t.Ret)))); err != nil {
+		return err
+	}
+	if _, err := w.Write(t.Ret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *ApproveReturn) UnmarshalCBOR(r io.Reader) error {
+	br := cbg.GetPeeker(r)
+
+	maj, extra, err := cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajArray {
+		return fmt.Errorf("cbor input should be of type array")
+	}
+
+	if extra != 3 {
+		return fmt.Errorf("cbor input had wrong number of fields")
+	}
+
+	// t.Applied (bool) (bool)
+
+	maj, extra, err = cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajOther {
+		return fmt.Errorf("booleans must be major type 7")
+	}
+	switch extra {
+	case 20:
+		t.Applied = false
+	case 21:
+		t.Applied = true
+	default:
+		return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
+	}
+	// t.Code (exitcode.ExitCode) (int64)
+	{
+		maj, extra, err := cbg.CborReadHeader(br)
+		var extraI int64
+		if err != nil {
+			return err
+		}
+		switch maj {
+		case cbg.MajUnsignedInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 positive overflow")
+			}
+		case cbg.MajNegativeInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 negative oveflow")
+			}
+			extraI = -1 - extraI
+		default:
+			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		}
+
+		t.Code = exitcode.ExitCode(extraI)
+	}
+	// t.Ret (runtime.CBORBytes) (slice)
+
+	maj, extra, err = cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+
+	if extra > cbg.ByteArrayMaxLen {
+		return fmt.Errorf("t.Ret: byte array too large (%d)", extra)
+	}
+	if maj != cbg.MajByteString {
+		return fmt.Errorf("expected byte array")
+	}
+	t.Ret = make([]byte, extra)
+	if _, err := io.ReadFull(br, t.Ret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *ProposeReturn) MarshalCBOR(w io.Writer) error {
+	if t == nil {
+		_, err := w.Write(cbg.CborNull)
+		return err
+	}
+	if _, err := w.Write([]byte{132}); err != nil {
+		return err
+	}
+
+	// t.TxnID (multisig.TxnID) (int64)
+	if t.TxnID >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.TxnID))); err != nil {
+			return err
+		}
+	} else {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.TxnID)-1)); err != nil {
+			return err
+		}
+	}
+
+	// t.Applied (bool) (bool)
+	if err := cbg.WriteBool(w, t.Applied); err != nil {
+		return err
+	}
+
+	// t.Code (exitcode.ExitCode) (int64)
+	if t.Code >= 0 {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.Code))); err != nil {
+			return err
+		}
+	} else {
+		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.Code)-1)); err != nil {
+			return err
+		}
+	}
+
+	// t.Ret (runtime.CBORBytes) (slice)
+	if len(t.Ret) > cbg.ByteArrayMaxLen {
+		return xerrors.Errorf("Byte array in field t.Ret was too long")
+	}
+
+	if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajByteString, uint64(len(t.Ret)))); err != nil {
+		return err
+	}
+	if _, err := w.Write(t.Ret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *ProposeReturn) UnmarshalCBOR(r io.Reader) error {
+	br := cbg.GetPeeker(r)
+
+	maj, extra, err := cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajArray {
+		return fmt.Errorf("cbor input should be of type array")
+	}
+
+	if extra != 4 {
+		return fmt.Errorf("cbor input had wrong number of fields")
+	}
+
+	// t.TxnID (multisig.TxnID) (int64)
+	{
+		maj, extra, err := cbg.CborReadHeader(br)
+		var extraI int64
+		if err != nil {
+			return err
+		}
+		switch maj {
+		case cbg.MajUnsignedInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 positive overflow")
+			}
+		case cbg.MajNegativeInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 negative oveflow")
+			}
+			extraI = -1 - extraI
+		default:
+			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		}
+
+		t.TxnID = TxnID(extraI)
+	}
+	// t.Applied (bool) (bool)
+
+	maj, extra, err = cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajOther {
+		return fmt.Errorf("booleans must be major type 7")
+	}
+	switch extra {
+	case 20:
+		t.Applied = false
+	case 21:
+		t.Applied = true
+	default:
+		return fmt.Errorf("booleans are either major type 7, value 20 or 21 (got %d)", extra)
+	}
+	// t.Code (exitcode.ExitCode) (int64)
+	{
+		maj, extra, err := cbg.CborReadHeader(br)
+		var extraI int64
+		if err != nil {
+			return err
+		}
+		switch maj {
+		case cbg.MajUnsignedInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 positive overflow")
+			}
+		case cbg.MajNegativeInt:
+			extraI = int64(extra)
+			if extraI < 0 {
+				return fmt.Errorf("int64 negative oveflow")
+			}
+			extraI = -1 - extraI
+		default:
+			return fmt.Errorf("wrong type for int64 field: %d", maj)
+		}
+
+		t.Code = exitcode.ExitCode(extraI)
+	}
+	// t.Ret (runtime.CBORBytes) (slice)
+
+	maj, extra, err = cbg.CborReadHeader(br)
+	if err != nil {
+		return err
+	}
+
+	if extra > cbg.ByteArrayMaxLen {
+		return fmt.Errorf("t.Ret: byte array too large (%d)", extra)
+	}
+	if maj != cbg.MajByteString {
+		return fmt.Errorf("expected byte array")
+	}
+	t.Ret = make([]byte, extra)
+	if _, err := io.ReadFull(br, t.Ret); err != nil {
+		return err
 	}
 	return nil
 }
