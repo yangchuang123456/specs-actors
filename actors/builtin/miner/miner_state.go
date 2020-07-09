@@ -1,7 +1,6 @@
 package miner
 
 import (
-	"container/heap"
 	"fmt"
 	"reflect"
 	"sort"
