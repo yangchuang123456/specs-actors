@@ -122,7 +122,7 @@ func (d *Deadline) AddFaultEpochPartitions(store adt.Store, epoch abi.ChainEpoch
 	return nil
 }
 
-func (dl *Deadline) PopExpiredPartitions(store adt.Store, until abi.ChainEpoch) (*PowerSet, error) {
+func (dl *Deadline) PopExpiredPartitions(store adt.Store, until abi.ChainEpoch) (*abi.BitField, error) {
 	stopErr := fmt.Errorf("stop")
 
 	partitionExpirationQ, err := adt.AsArray(store, dl.ExpirationsEpochs)
@@ -133,21 +133,14 @@ func (dl *Deadline) PopExpiredPartitions(store adt.Store, until abi.ChainEpoch) 
 	partitionsWithExpiredSectors := abi.NewBitField()
 	var expiredEpochs []uint64
 
-	totalPledge := big.Zero()
-	totalPower := PowerPairZero()
-	var partitionExpiration PowerSet
-	err = partitionExpirationQ.ForEach(&partitionExpiration, func(i int64) error {
+	var bf abi.BitField
+	err = partitionExpirationQ.ForEach(&bf, func(i int64) error {
 		if abi.ChainEpoch(i) > until {
 			return stopErr
 		}
 		expiredEpochs = append(expiredEpochs, uint64(i))
-		partitionsWithExpiredSectors, err = bitfield.MergeBitFields(partitionsWithExpiredSectors, partitionExpiration.Values)
-		if err != nil {
-			return err
-		}
-		totalPledge = big.Add(totalPledge, partitionExpiration.TotalPledge)
-		totalPower = totalPower.Add(partitionExpiration.TotalPower)
-		return nil
+		partitionsWithExpiredSectors, err = bitfield.MergeBitFields(partitionsWithExpiredSectors, &bf)
+		return err
 	})
 	switch err {
 	case nil, stopErr:
@@ -170,11 +163,7 @@ func (dl *Deadline) PopExpiredPartitions(store adt.Store, until abi.ChainEpoch) 
 		return nil, err
 	}
 
-	return &PowerSet{
-		Values:      partitionsWithExpiredSectors,
-		TotalPower:  totalPower,
-		TotalPledge: totalPledge,
-	}, nil
+	return partitionsWithExpiredSectors, nil
 }
 
 // TODO: Change this to ForEachExpired... to avoid creating a bitfield that's too large.
@@ -193,10 +182,13 @@ func (dl *Deadline) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*P
 		return nil, err
 	}
 
+	totalPledge := big.Zero()
+	totalPower := PowerPairZero()
+
 	// For each partition with an expired sector, collect the
 	// expired sectors and remove them from the queues.
 	var expiredSectors []*abi.BitField
-	err = partitionExpiration.Values.ForEach(func(partIdx uint64) error {
+	err = partitionExpiration.ForEach(func(partIdx uint64) error {
 		var partition Partition
 		found, err := partitions.Get(partIdx, &partition)
 		if err != nil {
@@ -209,7 +201,9 @@ func (dl *Deadline) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*P
 		if err != nil {
 			return err
 		}
-		expiredSectors = append(expiredSectors, partitionExpiredSectors)
+		expiredSectors = append(expiredSectors, partitionExpiredSectors.Values)
+		totalPledge = big.Add(totalPledge, partitionExpiredSectors.TotalPledge)
+		totalPower = totalPower.Add(partitionExpiredSectors.TotalPledge)
 		return partitions.Set(partIdx, &partition)
 	})
 	if err != nil {

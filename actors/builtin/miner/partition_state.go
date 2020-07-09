@@ -151,7 +151,7 @@ func (p *Partition) RemoveRecoveries(sectorNos *abi.BitField, power PowerPair) (
 	return nil
 }
 
-func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*bitfield.BitField, error) {
+func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*PowerSet, error) {
 	stopErr := fmt.Errorf("stop")
 
 	sectorExpirationQ, err := adt.AsArray(store, p.ExpirationsEpochs)
@@ -161,18 +161,22 @@ func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*b
 
 	expiredSectors := abi.NewBitField()
 
+	totalPledge := big.Zero()
+	totalPower := PowerPairZero()
+
 	var expiredEpochs []uint64
-	var bf bitfield.BitField
-	err = sectorExpirationQ.ForEach(&bf, func(i int64) error {
+	var expiration PowerSet
+	err = sectorExpirationQ.ForEach(&expiration, func(i int64) error {
 		if abi.ChainEpoch(i) > until {
 			return stopErr
 		}
 		expiredEpochs = append(expiredEpochs, uint64(i))
+		totalPledge = big.Add(totalPledge, expiration.TotalPledge)
+		totalPower = totalPower.Add(expiration.TotalPower)
+
 		// TODO: What if this grows too large?
-		expiredSectors, err = bitfield.MergeBitFields(expiredSectors, bf)
-		if err != nil {
-			return err
-		}
+		expiredSectors, err = bitfield.MergeBitFields(expiredSectors, expiration.Values)
+		return err
 	})
 	switch err {
 	case nil, stopErr:
@@ -190,7 +194,13 @@ func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*b
 		return nil, err
 	}
 
-	return expiredSectors, nil
+	// TODO: Update power/pledge?
+
+	return &PowerSet{
+		Values:      expiredSectors,
+		TotalPower:  totalPower,
+		TotalPledge: totalPledge,
+	}, nil
 }
 
 // Marks all non-faulty sectors in the partition as faulty and clears recoveries, updating power memos appropriately.
