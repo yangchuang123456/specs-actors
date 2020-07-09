@@ -369,7 +369,6 @@ func (st *State) AssignSectorsToDeadlines(
 		return err
 	}
 
-	// TODO: Assign all sectors to "pending" partitions.
 	// We should definitely sort by sector number.
 	// Should we try to find a deadline with nearby sectors? That's probably really expensive.
 	deadlines, err := st.LoadDeadlines(store)
