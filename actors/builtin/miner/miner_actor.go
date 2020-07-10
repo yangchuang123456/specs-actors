@@ -1373,7 +1373,6 @@ func validateExpiration(rt Runtime, st *State, activation, expiration abi.ChainE
 }
 
 func validateReplaceSector(rt Runtime, st *State, store adt.Store, params *SectorPreCommitInfo) *SectorOnChainInfo {
-	// TODO: validate sector _location_? It doesn't really hurt anyone but the miner to not do that...
 	replaceSector, found, err := st.GetSector(store, params.ReplaceSector.SectorNumber)
 	builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to load sector %v", params.SectorNumber)
 	if !found {
@@ -1391,12 +1390,26 @@ func validateReplaceSector(rt Runtime, st *State, store adt.Store, params *Secto
 		rt.Abortf(exitcode.ErrIllegalArgument, "cannot replace sector %v expiration %v with sooner expiration %v",
 			params.ReplaceSector.SectorNumber, replaceSector.Expiration, params.Expiration)
 	}
-	healthy, err := st.IsHealthy(store, params.ReplaceSector)
+
+	status, err := st.SectorStatus(store, params.ReplaceSector)
 	builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to check sector health %v", params.ReplaceSector)
-	if !healthy {
-		// Note: the sector might still fault later, in which case we should not license its termination.
-		rt.Abortf(exitcode.ErrIllegalArgument, "cannot replace faulty and/or terminated sector %v", params.ReplaceSector)
+
+	switch status {
+	case SectorNotFound:
+		rt.Abortf(exitcode.ErrIllegalArgument, "sector %d not found at %d:%d (deadline:partition)",
+			params.ReplaceSector.SectorNumber, params.ReplaceSector.Deadline, params.ReplaceSector.Partition,
+		)
+	case SectorFaulty:
+		rt.Abortf(exitcode.ErrIllegalArgument, "cannot replace faulty sector %d", params.ReplaceSector.SectorNumber)
+	case SectorTerminated:
+		rt.Abortf(exitcode.ErrIllegalArgument, "cannot replace terminated sector %d", params.ReplaceSector.SectorNumber)
+	case SectorHealthy:
+		// pass
+	default:
+		// TODO: Just panic?
+		rt.Abortf(exitcode.ErrIllegalState, "unexpected sector status %d", status)
 	}
+
 	return replaceSector
 }
 

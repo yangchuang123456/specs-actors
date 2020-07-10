@@ -140,6 +140,15 @@ type SectorLocation struct {
 	SectorNumber        abi.SectorNumber
 }
 
+type SectorStatus int
+
+const (
+	SectorNotFound SectorStatus = iota
+	SectorFaulty
+	SectorTerminated
+	SectorHealthy
+)
+
 func ConstructState(infoCid cid.Cid, periodStart abi.ChainEpoch, emptyArrayCid, emptyMapCid, emptyDeadlinesCid cid.Cid) (*State, error) {
 
 	return &State{
@@ -802,33 +811,50 @@ func (st *State) ClearFaultEpochs(store adt.Store, epochs ...abi.ChainEpoch) err
 }
 
 // TODO: take multiple sector locations?
-func (st *State) IsHealthy(store adt.Store, sector SectorLocation) (bool, error) {
+// Returns the sector's status (healthy, faulty, missing, not found, terminated)
+func (st *State) SectorStatus(store adt.Store, sector SectorLocation) (SectorStatus, error) {
 	dls, err := st.LoadDeadlines(store)
 	if err != nil {
-		return false, err
+		return SectorNotFound, err
 	}
+
+	// Pre-check this because LoadDeadline will return an actual error.
+	if sector.Deadline >= WPoStPeriodDeadlines {
+		return SectorNotFound, nil
+	}
+
 	dl, err := dls.LoadDeadline(store, sector.Deadline)
 	if err != nil {
-		return false, err
+		return SectorNotFound, err
 	}
+
+	// TODO: this will return an error if we can't find the given partition.
+	// That will lead to an illegal _state_ error, not an illegal argument
+	// error. We should fix that.
 	partition, err := dl.LoadPartition(store, sector.Partition)
 	if err != nil {
-		return false, xerrors.Errorf("in deadline %d: %w", sector.Deadline, err)
+		return SectorNotFound, xerrors.Errorf("in deadline %d: %w", sector.Deadline, err)
+	}
+
+	if exists, err := partition.Sectors.IsSet(uint64(sector.SectorNumber)); err != nil {
+		return SectorNotFound, err
+	} else if !exists {
+		return SectorNotFound, nil
 	}
 
 	if faulty, err := partition.Faults.IsSet(uint64(sector.SectorNumber)); err != nil {
-		return false, err
+		return SectorNotFound, err
 	} else if faulty {
-		return false, nil
+		return SectorFaulty, nil
 	}
 
 	if terminated, err := partition.Terminated.IsSet(uint64(sector.SectorNumber)); err != nil {
-		return false, err
+		return SectorNotFound, err
 	} else if terminated {
-		return false, nil
+		return SectorTerminated, nil
 	}
 
-	return true, nil
+	return SectorHealthy, nil
 }
 
 // Loads sector info for a sequence of sectors.
