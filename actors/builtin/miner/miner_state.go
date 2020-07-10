@@ -107,8 +107,9 @@ type SectorPreCommitInfo struct {
 	SealRandEpoch   abi.ChainEpoch
 	DealIDs         []abi.DealID
 	Expiration      abi.ChainEpoch
-	ReplaceCapacity bool             // Whether to replace a "committed capacity" no-deal sector (requires non-empty DealIDs)
-	ReplaceSector   abi.SectorNumber // The committed capacity sector to replace
+	ReplaceCapacity bool // Whether to replace a "committed capacity" no-deal sector (requires non-empty DealIDs)
+	// TODO: just store this as 3 separate fields?
+	ReplaceSector SectorLocation // The committed capacity sector to replace
 }
 
 // Information stored on-chain for a pre-committed sector.
@@ -248,6 +249,32 @@ func (st *State) GetPrecommittedSector(store adt.Store, sectorNo abi.SectorNumbe
 		return nil, false, errors.Wrapf(err, "failed to load precommitment for %v", sectorNo)
 	}
 	return &info, found, nil
+}
+
+// This method gets and returns the requested pre-committed sectors, skipping
+// missing sectors.
+func (st *State) GetExistingPrecommittedSectors(store adt.Store, sectorNos ...abi.SectorNumber) ([]*SectorPreCommitOnChainInfo, error) {
+	precommitted, err := adt.AsMap(store, st.PreCommittedSectors)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*SectorPreCommitOnChainInfo, 0, len(sectorNos))
+
+	for _, sectorNo := range sectorNos {
+		var info SectorPreCommitOnChainInfo
+		found, err := precommitted.Get(SectorKey(sectorNo), &info)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to load precommitment for %v", sectorNo)
+		}
+		if !found {
+			// TODO #564 log: "failed to get precommitted sector on sector %d, dropping from prove commit set"
+			continue
+		}
+		result = append(result, &info)
+	}
+
+	return result, nil
 }
 
 func (st *State) DeletePrecommittedSectors(store adt.Store, sectorNos ...abi.SectorNumber) error {
