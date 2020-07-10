@@ -252,7 +252,16 @@ func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*P
 		return nil, err
 	}
 
-	// TODO: Update power/pledge?
+	// TODO: what about faulty sectors?
+	// TODO: Update Faulty bitfield?
+	// TODO: Update recoveries bitfield?
+
+	// Remove expired sectors and expired sector power.
+	p.TotalPower = p.TotalPower.Sub(totalPower)
+	p.Terminated, err = bitfield.MergeBitFields(p.Terminated, expiredSectors)
+	if err != nil {
+		return nil, err
+	}
 
 	return &PowerSet{
 		Values:     expiredSectors,
