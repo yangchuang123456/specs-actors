@@ -355,6 +355,7 @@ func (st *State) ForEachSector(store adt.Store, f func(*SectorOnChainInfo)) erro
 func (st *State) WalkSectors(
 	store adt.Store,
 	locations []SectorLocation,
+	beforeDeadlineCb func(dlIdx uint64, dl *Deadline) (update bool, err error),
 	partitionCb func(dl *Deadline, partition *Partition, dlIdx, partIdx uint64, sectors *bitfield.BitField) (update bool, err error),
 	afterDeadlineCb func(dlIdx uint64, dl *Deadline) (update bool, err error),
 ) error {
@@ -385,7 +386,7 @@ func (st *State) WalkSectors(
 			return err
 		}
 
-		deadlineUpdated, err = beforeDeadlineCb(dl, dlIdx)
+		deadlineUpdated, err = beforeDeadlineCb(uint64(dlIdx), dl)
 		if err != nil {
 			return err
 		}
@@ -414,15 +415,20 @@ func (st *State) WalkSectors(
 			}
 
 			sectorNos := partitions[partIdx]
-			foundSectors, errs := bitfield.IntersectBitField(bitfield.NewFromSet(sectorNos), partition.Sectors)
+			foundSectors, err := bitfield.IntersectBitField(bitfield.NewFromSet(sectorNos), partition.Sectors)
+			if err != nil {
+				return err
+			}
 
 			// Anything to update?
-			if foundSectors.IsEmpty() {
+			if empty, err := foundSectors.IsEmpty(); err != nil {
+				return err
+			} else if empty {
 				// no.
 				continue
 			}
 
-			if updated, err := partitionCb(dl, &partition, dlIdx, partIdx, foundSectors); err != nil {
+			if updated, err := partitionCb(dl, &partition, uint64(dlIdx), partIdx, foundSectors); err != nil {
 				return err
 			} else if updated {
 				if empty, err := partition.Sectors.IsEmpty(); err != nil {
@@ -444,10 +450,10 @@ func (st *State) WalkSectors(
 				return err
 			}
 		}
-		if updated, err := afterDeadlineCb(dl, dlIdx); err != nil {
+		if updated, err := afterDeadlineCb(uint64(dlIdx), dl); err != nil {
 			return err
 		} else if updated || deadlineUpdated {
-			if err := deadlines.UpdateDeadline(store, dlIdx, dl); err != nil {
+			if err := deadlines.UpdateDeadline(store, uint64(dlIdx), dl); err != nil {
 				return err
 			}
 			deadlinesUpdated = true
