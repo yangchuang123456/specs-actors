@@ -232,6 +232,13 @@ func (dl *Deadline) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*P
 		return nil, err
 	}
 
+	// Update live sector count.
+	nExpired, err := allExpiries.Count()
+	if err != nil {
+		return nil, xerrors.Errorf("failed to count expired sectors: %w", err)
+	}
+	dl.LiveSectors -= nExpired
+
 	return &PowerSet{
 		Values:     allExpiries,
 		TotalPower: totalPower,

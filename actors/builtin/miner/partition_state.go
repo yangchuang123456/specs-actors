@@ -255,6 +255,7 @@ func (p *Partition) PopExpiredSectors(store adt.Store, until abi.ChainEpoch) (*P
 	// TODO: what about faulty sectors?
 	// TODO: Update Faulty bitfield?
 	// TODO: Update recoveries bitfield?
+	// TODO: What if the sector was already terminated? Should we remove it from the set? Error?
 
 	// Remove expired sectors and expired sector power.
 	p.TotalPower = p.TotalPower.Sub(totalPower)
