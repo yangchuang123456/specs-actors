@@ -357,7 +357,7 @@ func (dl *Deadline) AddSectors(
 	// Next, update the per-deadline expiration queues.
 
 	{
-		deadlineExpirations, err := adt.AsArray(store, dl.ExpirationsEpochs)
+		deadlineExpirations, err := loadEpochQueue(store, dl.ExpirationsEpochs)
 		if err != nil {
 			return xerrors.Errorf("failed to load expiration epochs: %w", err)
 		}
@@ -372,22 +372,7 @@ func (dl *Deadline) AddSectors(
 		})
 
 		for _, epoch := range updatedEpochs {
-			update := partitionDeadlineUpdates[epoch]
-
-			// Get or create the expiration at this epoch.
-			bf := abi.NewBitField()
-			_, err := deadlineExpirations.Get(uint64(epoch), bf)
-			if err != nil {
-				return err
-			}
-
-			// Update it.
-			for _, partIdx := range update {
-				bf.Set(partIdx)
-			}
-
-			// Put it back.
-			deadlineExpirations.Set(uint64(epoch), bf)
+			deadlineExpirations.AddToQueueValues(epoch, partitionDeadlineUpdates[epoch]...)
 		}
 
 		dl.ExpirationsEpochs, err = deadlineExpirations.Root()
