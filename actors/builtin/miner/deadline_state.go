@@ -108,6 +108,22 @@ func (d *Deadline) PartitionsArray(store adt.Store) (*adt.Array, error) {
 	return adt.AsArray(store, d.Partitions)
 }
 
+func (d *Deadline) LoadPartition(store adt.Store, partIdx uint64) (*Partition, error) {
+	partitions, err := d.PartitionsArray(store)
+	if err != nil {
+		return nil, err
+	}
+	var partition Partition
+	found, err := partitions.Get(partIdx, &partition)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, xerrors.Errorf("no partition %d", partIdx)
+	}
+	return &partition, nil
+}
+
 // Adds some partition numbers to the set with faults at an epoch.
 func (d *Deadline) AddFaultEpochPartitions(store adt.Store, epoch abi.ChainEpoch, partitions ...uint64) error {
 	queue, err := loadEpochQueue(store, d.FaultsEpochs)

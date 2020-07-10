@@ -774,6 +774,36 @@ func (st *State) ClearFaultEpochs(store adt.Store, epochs ...abi.ChainEpoch) err
 	return err
 }
 
+// TODO: take multiple sector locations?
+func (st *State) IsHealthy(store adt.Store, sector SectorLocation) (bool, error) {
+	dls, err := st.LoadDeadlines(store)
+	if err != nil {
+		return false, err
+	}
+	dl, err := dls.LoadDeadline(store, sector.Deadline)
+	if err != nil {
+		return false, err
+	}
+	partition, err := dl.LoadPartition(store, sector.Partition)
+	if err != nil {
+		return false, xerrors.Errorf("in deadline %d: %w", sector.Deadline, err)
+	}
+
+	if faulty, err := partition.Faults.IsSet(uint64(sector.SectorNumber)); err != nil {
+		return false, err
+	} else if faulty {
+		return false, nil
+	}
+
+	if terminated, err := partition.Terminated.IsSet(uint64(sector.SectorNumber)); err != nil {
+		return false, err
+	} else if terminated {
+		return false, nil
+	}
+
+	return true, nil
+}
+
 // Loads sector info for a sequence of sectors.
 func (st *State) LoadSectorInfos(store adt.Store, sectors *abi.BitField) ([]*SectorOnChainInfo, error) {
 	var sectorInfos []*SectorOnChainInfo
