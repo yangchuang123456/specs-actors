@@ -467,6 +467,147 @@ func (st *State) WalkSectors(
 	return nil
 }
 
+// Schedule's each sector to expire after it's next proving period.
+//
+// If it can't find any given sector, it skips it.
+//
+// TODO: this function doesn't actually generalize well (it can only be used for
+// "replaced" sectors, otherwise it'll mess with power. We should either
+// move/rename it, or try to find some way to generalize it (i.e., not mess with
+// power).
+func (st *State) RescheduleSectorExpirations(rt Runtime, store adt.Store, sectorSize abi.SectorSize, sectors []SectorLocation) error {
+	// Mark replaced sectors for on-time expiration at the end of the current proving period.
+	// They can't be removed right now because they may yet be challenged for Window PoSt in this period,
+	// and the deadline assignments can't be changed mid-period.
+	// If their initial pledge hasn't finished vesting yet, it just continues vesting (like other termination paths).
+	// Note that a sector's weight and power were calculated from its lifetime when the sector was first
+	// committed, but are not recalculated here. We only get away with this because we know the replaced sector
+	// has no deals and so its power does not vary with lifetime.
+	// That's a very brittle constraint, and would be much better with two-phase termination (where we could
+	// deduct power immediately).
+	// See https://github.com/filecoin-project/specs-actors/issues/535
+
+	var (
+		currEpoch        = rt.CurrEpoch()
+		newEpoch         abi.ChainEpoch
+		movedExpirations map[abi.ChainEpoch][]uint64 // track moved partition expirations.
+	)
+	st.WalkSectors(store, sectors,
+		// Prepare to process deadline.
+		func(dlIdx uint64, dl *Deadline) (bool, error) {
+			movedExpirations = make(map[abi.ChainEpoch][]uint64)
+
+			//
+			// Figure out the next deadline end.
+			//
+
+			// TODO: is the proving period start always going to be
+			// correct here? Can we assume that cron has already
+			// updated it?
+			dlInfo := NewDeadlineInfo(st.ProvingPeriodStart, dlIdx, currEpoch)
+			if dlInfo.HasElapsed() {
+				// pick the next one.
+				dlInfo = NewDeadlineInfo(dlInfo.NextPeriodStart(), dlIdx, currEpoch)
+			}
+			newEpoch = dlInfo.Close // TODO: make sure this isn't off by one, or anyting.
+			return false, nil
+		},
+		// Process partitions in deadline.
+		func(dl *Deadline, partition *Partition, dlIdx, partIdx uint64, sectors *bitfield.BitField) (bool, error) {
+			nonTerminated, err := bitfield.SubtractBitField(sectors, partition.Terminated)
+			if err != nil {
+				return false, err
+			}
+
+			nonFaulty, err := bitfield.SubtractBitField(nonTerminated, partition.Faults)
+			if err != nil {
+				return false, err
+			}
+
+			sectorInfos, err := st.LoadSectorInfos(store, nonFaulty)
+			if err != nil {
+				return false, err
+			}
+
+			if len(sectorInfos) == 0 {
+				// Nothing to do
+				return false, nil
+			}
+
+			// TODO: What if I replace the same sector multiple times? I guess that's OK...
+			err = partition.RescheduleExpirations(store, sectorSize, newEpoch, sectorInfos)
+			if err != nil {
+				return false, err
+			}
+
+			// Record the old epochs so we can fix the deadline's queue.
+			for _, sector := range sectorInfos {
+				partitions := movedExpirations[sector.Expiration]
+				if len(partitions) > 0 && partitions[len(partitions)-1] == partIdx {
+					continue
+				}
+				movedExpirations[sector.Expiration] = append(partitions, partIdx)
+			}
+
+			// Update the expirations.
+			for _, sector := range sectorInfos {
+				sector.Expiration = newEpoch
+			}
+
+			// TODO: Do we _really_ need to do this? This only
+			// happens to not mess with sector powers because these
+			// sectors can't have deals.
+			// TODO: Check to make sure these sectors don't have deals?
+			err = st.PutSectors(store, sectorInfos...)
+			if err != nil {
+				return false, xerrors.Errorf("failed to put back sector infos after updating expirations: %w", err)
+			}
+
+			return true, nil
+		},
+		// Update deadline.
+		func(dlIdx uint64, dl *Deadline) (bool, error) {
+			if len(movedExpirations) == 0 {
+				return false, nil
+			}
+
+			q, err := loadEpochQueue(store, dl.ExpirationsEpochs)
+			if err != nil {
+				return false, err
+			}
+			epochs := make([]abi.ChainEpoch, 0, len(movedExpirations))
+			for epoch := range movedExpirations {
+				epochs = append(epochs, epoch)
+			}
+			sort.Slice(epochs, func(i, j int) bool {
+				return epochs[i] < epochs[j]
+			})
+
+			var movedPartitions []uint64
+			for _, epoch := range epochs {
+				partitions := movedExpirations[epoch]
+				err := q.RemoveFromQueueValues(epoch, partitions...)
+				if err != nil {
+					return false, err
+				}
+				movedPartitions = append(movedPartitions, partitions...)
+			}
+
+			err = q.AddToQueueValues(newEpoch, movedPartitions...)
+			if err != nil {
+				return false, err
+			}
+
+			dl.ExpirationsEpochs, err = q.Root()
+			if err != nil {
+				return false, err
+			}
+			return true, nil
+		},
+	)
+	return nil
+}
+
 // Assign new sectors to deadlines.
 func (st *State) AssignSectorsToDeadlines(
 	store adt.Store,
