@@ -197,8 +197,14 @@ func (p *Partition) RescheduleExpirations(store adt.Store, sectorSize abi.Sector
 		powerTotal = powerTotal.Add(group.totalPower)
 	}
 
-	if err = expirations.AddToQueue(epoch, sectorsTotal, powerTotal); err != nil {
-		return err // XXX ANORTH HERE merge sectorstotal
+	// XXX(steb): This is slower than just accumulating a set of sector numbers.
+	sectorsBf, err := bitfield.MultiMerge(sectorsTotal...)
+	if err != nil {
+		return err
+	}
+
+	if err = expirations.AddToQueue(epoch, sectorsBf, powerTotal); err != nil {
+		return err
 	}
 
 	p.ExpirationsEpochs, err = expirations.Root()
