@@ -532,7 +532,7 @@ func (st *State) RescheduleSectorExpirations(store adt.Store, currEpoch abi.Chai
 		newEpoch         abi.ChainEpoch
 		movedExpirations map[abi.ChainEpoch][]uint64 // track moved partition expirations.
 	)
-	st.WalkSectors(store, sectors,
+	return st.WalkSectors(store, sectors,
 		// Prepare to process deadline.
 		func(dlIdx uint64, dl *Deadline) (bool, error) {
 			movedExpirations = make(map[abi.ChainEpoch][]uint64)
@@ -653,7 +653,6 @@ func (st *State) RescheduleSectorExpirations(store adt.Store, currEpoch abi.Chai
 			return true, nil
 		},
 	)
-	return nil
 }
 
 // Assign new sectors to deadlines.
