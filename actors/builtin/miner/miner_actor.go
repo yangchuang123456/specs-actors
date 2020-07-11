@@ -615,7 +615,7 @@ func (a Actor) ConfirmSectorProofsValid(rt Runtime, params *builtin.ConfirmSecto
 	newSectors := make([]*SectorOnChainInfo, 0)
 	newlyVestedAmount := rt.State().Transaction(&st, func() interface{} {
 		// Schedule expiration for replaced sectors.
-		err = st.RescheduleSectorExpirations(rt, store, info.SectorSize, replaceSectorLocations)
+		err = st.RescheduleSectorExpirations(store, rt.CurrEpoch(), info.SectorSize, replaceSectorLocations)
 		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to replace sector expirations")
 
 		newSectorNos := make([]abi.SectorNumber, 0, len(preCommits))

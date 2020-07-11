@@ -503,7 +503,8 @@ func (st *State) WalkSectors(
 	return nil
 }
 
-// Schedule's each sector to expire after it's next proving period.
+// Schedule's each sector to expire after it's next deadline ends (based on the
+// given currEpoch).
 //
 // If it can't find any given sector, it skips it.
 //
@@ -511,7 +512,11 @@ func (st *State) WalkSectors(
 // "replaced" sectors, otherwise it'll mess with power. We should either
 // move/rename it, or try to find some way to generalize it (i.e., not mess with
 // power).
-func (st *State) RescheduleSectorExpirations(rt Runtime, store adt.Store, sectorSize abi.SectorSize, sectors []SectorLocation) error {
+//
+// TODO: This function can return errors for both illegal arguments, and invalid
+// state. However, we have no way to distinguish between them. We should fix
+// this.
+func (st *State) RescheduleSectorExpirations(store adt.Store, currEpoch abi.ChainEpoch, sectorSize abi.SectorSize, sectors []SectorLocation) error {
 	// Mark replaced sectors for on-time expiration at the end of the current proving period.
 	// They can't be removed right now because they may yet be challenged for Window PoSt in this period,
 	// and the deadline assignments can't be changed mid-period.
@@ -524,7 +529,6 @@ func (st *State) RescheduleSectorExpirations(rt Runtime, store adt.Store, sector
 	// See https://github.com/filecoin-project/specs-actors/issues/535
 
 	var (
-		currEpoch        = rt.CurrEpoch()
 		newEpoch         abi.ChainEpoch
 		movedExpirations map[abi.ChainEpoch][]uint64 // track moved partition expirations.
 	)
@@ -587,7 +591,15 @@ func (st *State) RescheduleSectorExpirations(rt Runtime, store adt.Store, sector
 
 			// Update the expirations.
 			for _, sector := range sectorInfos {
+				powerBefore := QAPowerForSector(sectorSize, sector)
 				sector.Expiration = newEpoch
+				powerAfter := QAPowerForSector(sectorSize, sector)
+				if !powerBefore.Equals(powerAfter) {
+					return false, xerrors.Errorf(
+						"failed to schedule early expiration for replaced sector: power changes from %s to %s",
+						powerBefore, powerAfter,
+					)
+				}
 			}
 
 			// TODO: Do we _really_ need to do this? This only
