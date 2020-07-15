@@ -2,6 +2,8 @@ package miner
 
 import (
 	"fmt"
+	"log"
+
 	"reflect"
 
 	addr "github.com/filecoin-project/go-address"
@@ -889,6 +891,8 @@ func (st *State) AddLockedFunds(store adt.Store, currEpoch abi.ChainEpoch, vesti
 		return err
 	}
 
+	log.Println("AddLockedFunds start epoch",currEpoch)
+	printVestingFunds(vestingFunds)
 	// Nothing unlocks here, this is just the start of the clock.
 	vestBegin := currEpoch + spec.InitialDelay
 	vestPeriod := big.NewInt(int64(spec.VestPeriod))
@@ -928,7 +932,8 @@ func (st *State) AddLockedFunds(store adt.Store, currEpoch abi.ChainEpoch, vesti
 		return err
 	}
 	st.LockedFunds = big.Add(st.LockedFunds, vestingSum)
-
+	log.Println("AddLockedFunds end epoch",currEpoch)
+	printVestingFunds(vestingFunds)
 	return nil
 }
 
@@ -987,6 +992,14 @@ func (st *State) UnlockUnvestedFunds(store adt.Store, currEpoch abi.ChainEpoch, 
 	return amountUnlocked, nil
 }
 
+func printVestingFunds(a *adt.Array){
+	lockedEntry := abi.NewTokenAmount(0)
+	a.ForEach(&lockedEntry,func(k int64)error{
+			log.Println("the k and lockEntry is:",k,lockedEntry)
+		return nil
+	})
+}
+
 // Unlocks all vesting funds that have vested before the provided epoch.
 // Returns the amount unlocked.
 func (st *State) UnlockVestedFunds(store adt.Store, currEpoch abi.ChainEpoch) (abi.TokenAmount, error) {
@@ -999,6 +1012,9 @@ func (st *State) UnlockVestedFunds(store adt.Store, currEpoch abi.ChainEpoch) (a
 	lockedEntry := abi.NewTokenAmount(0)
 	var toDelete []uint64
 	var finished = fmt.Errorf("finished")
+
+	log.Println("UnlockVestedFunds start epoch",currEpoch)
+	printVestingFunds(vestingFunds)
 
 	// Iterate vestingFunds  in order of release.
 	err = vestingFunds.ForEach(&lockedEntry, func(k int64) error {
@@ -1026,7 +1042,8 @@ func (st *State) UnlockVestedFunds(store adt.Store, currEpoch abi.ChainEpoch) (a
 	if err != nil {
 		return big.Zero(), err
 	}
-
+	log.Println("UnlockVestedFunds end epoch",currEpoch)
+	printVestingFunds(vestingFunds)
 	return amountUnlocked, nil
 }
 
