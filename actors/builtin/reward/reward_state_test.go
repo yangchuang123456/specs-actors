@@ -65,3 +65,8 @@ func TestMintingFunction(t *testing.T) {
 		}
 	}
 }
+
+
+func Test_SimpleSupply(t *testing.T){
+	//mintingFunction(SimpleTotal,)
+}

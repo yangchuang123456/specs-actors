@@ -2,14 +2,15 @@ package init
 
 import (
 	addr "github.com/filecoin-project/go-address"
-	cid "github.com/ipfs/go-cid"
-
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	builtin "github.com/filecoin-project/specs-actors/actors/builtin"
 	runtime "github.com/filecoin-project/specs-actors/actors/runtime"
 	exitcode "github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
 	autil "github.com/filecoin-project/specs-actors/actors/util"
 	adt "github.com/filecoin-project/specs-actors/actors/util/adt"
+	cid "github.com/ipfs/go-cid"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
 )
 
 // The init actor uniquely has the power to create new actors.
@@ -30,6 +31,7 @@ type ConstructorParams struct {
 }
 
 func (a Actor) Constructor(rt runtime.Runtime, params *ConstructorParams) *adt.EmptyValue {
+	actorlog.L.Info("call init actor constructor")
 	rt.ValidateImmediateCallerIs(builtin.SystemActorAddr)
 	emptyMap, err := adt.MakeEmptyMap(adt.AsStore(rt)).Root()
 	if err != nil {
@@ -76,6 +78,7 @@ func (a Actor) Exec(rt runtime.Runtime, params *ExecParams) *ExecReturn {
 		return idAddr
 	}).(addr.Address)
 
+	actorlog.L.Info("init actor creat actor id:",zap.String("idAddr",idAddr.String()))
 	// Create an empty actor.
 	rt.CreateActor(params.CodeCID, idAddr)
 
