@@ -128,7 +128,7 @@ func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePo
 
 		st.updateToNextEpochWithReward(*currRealizedPower)
 		actorlog.L.Info("the reward actor state after update is:",zap.Any("state",st))
-
+		return nil
 	})
 	actorlog.L.Info("")
 	return nil
