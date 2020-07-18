@@ -2,6 +2,8 @@ package miner
 
 import (
 	"fmt"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
 
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
@@ -126,6 +128,7 @@ func QualityForWeight(size abi.SectorSize, duration abi.ChainEpoch, dealWeight, 
 
 // Returns the power for a sector size and weight.
 func QAPowerForWeight(size abi.SectorSize, duration abi.ChainEpoch, dealWeight, verifiedWeight abi.DealWeight) abi.StoragePower {
+	actorlog.L.Info("miner policy QAPowerForWeight",zap.Any("sectorSize",size),zap.Any("duration",duration),zap.Any("dealWeight",dealWeight),zap.Any("verifiedWeight",verifiedWeight))
 	quality := QualityForWeight(size, duration, dealWeight, verifiedWeight)
 	return big.Rsh(big.Mul(big.NewIntUnsigned(uint64(size)), quality), SectorQualityPrecision)
 }

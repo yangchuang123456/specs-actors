@@ -2,6 +2,8 @@ package reward
 
 import (
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
 
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
@@ -27,12 +29,12 @@ var _ abi.Invokee = Actor{}
 
 func (a Actor) Constructor(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	rt.ValidateImmediateCallerIs(builtin.SystemActorAddr)
-
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
 		return nil // linter does not understand abort exiting
 	}
 	st := ConstructState(*currRealizedPower)
+	actorlog.L.Info("call reward actor constructor")
 	rt.State().Create(st)
 	return nil
 }
@@ -55,6 +57,7 @@ type AwardBlockRewardParams struct {
 // The reward is reduced before the residual is credited to the block producer, by:
 // - a penalty amount, provided as a parameter, which is burnt,
 func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) *adt.EmptyValue {
+	actorlog.L.Info("call reward actor AwardBlockReward")
 	rt.ValidateImmediateCallerIs(builtin.SystemActorAddr)
 	AssertMsg(rt.CurrentBalance().GreaterThanEqual(params.GasReward),
 		"actor current balance %v insufficient to pay gas reward %v", rt.CurrentBalance(), params.GasReward)
@@ -108,12 +111,14 @@ func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *abi.TokenAmou
 // This is not necessarily what we want, and may change.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
+	actorlog.L.Info("reward actor call update network kpi")
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
 	}
 
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
+		actorlog.L.Info("the reward actor state before update is:",zap.Any("state",st))
 		// if there were null runs catch up the computation until
 		// st.Epoch == rt.CurrEpoch()
 		for st.Epoch < rt.CurrEpoch() {
@@ -122,7 +127,9 @@ func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePo
 		}
 
 		st.updateToNextEpochWithReward(*currRealizedPower)
-		return nil
+		actorlog.L.Info("the reward actor state after update is:",zap.Any("state",st))
+
 	})
+	actorlog.L.Info("")
 	return nil
 }

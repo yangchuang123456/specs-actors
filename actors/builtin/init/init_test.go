@@ -2,6 +2,7 @@ package init_test
 
 import (
 	"context"
+	"log"
 	"testing"
 
 	cid "github.com/ipfs/go-cid"
@@ -229,4 +230,8 @@ func (h *initHarness) execAndVerify(rt *mock.Runtime, codeID cid.Cid, constructo
 	}).(*init_.ExecReturn)
 	rt.Verify()
 	return ret
+}
+
+func Test_getAccountCodeId(t *testing.T){
+	log.Println("the account code Id is",builtin.AccountActorCodeID)
 }

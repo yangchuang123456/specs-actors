@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
 
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-bitfield"
@@ -74,6 +76,7 @@ var _ abi.Invokee = Actor{}
 type ConstructorParams = power.MinerConstructorParams
 
 func (a Actor) Constructor(rt Runtime, params *ConstructorParams) *adt.EmptyValue {
+	actorlog.L.Info("call miner actor constructor")
 	rt.ValidateImmediateCallerIs(builtin.InitActorAddr)
 
 	_, ok := SupportedProofTypes[params.SealProofType]
@@ -349,6 +352,8 @@ func (a Actor) SubmitWindowedPoSt(rt Runtime, params *SubmitWindowedPoStParams) 
 // Proposals must be posted on chain via sma.PublishStorageDeals before PreCommitSector.
 // Optimization: PreCommitSector could contain a list of deals that are not published yet.
 func (a Actor) PreCommitSector(rt Runtime, params *SectorPreCommitInfo) *adt.EmptyValue {
+	actorlog.L.Info("call miner actor preCommitSector",zap.Any("currentEpoch",rt.CurrEpoch()))
+	params.Print()
 	if params.Expiration <= rt.CurrEpoch() {
 		rt.Abortf(exitcode.ErrIllegalArgument, "sector expiration %v must be after now (%v)", params.Expiration, rt.CurrEpoch())
 	}
@@ -415,7 +420,7 @@ func (a Actor) PreCommitSector(rt Runtime, params *SectorPreCommitInfo) *adt.Emp
 		if availableBalance.LessThan(depositReq) {
 			rt.Abortf(exitcode.ErrInsufficientFunds, "insufficient funds for pre-commit deposit: %v", depositReq)
 		}
-
+		actorlog.L.Info("miner actor PreCommitSector add depositReq",zap.Any("depositReq",depositReq))
 		st.AddPreCommitDeposit(depositReq)
 		st.AssertBalanceInvariants(rt.CurrentBalance())
 
@@ -1757,6 +1762,7 @@ func enrollCronEvent(rt Runtime, eventEpoch abi.ChainEpoch, callbackPayload *Cro
 }
 
 func requestUpdateSectorPower(rt Runtime, sectorSize abi.SectorSize, sectorsAdded, sectorsRemoved []*SectorOnChainInfo) (rawDelta, qaDelta big.Int) {
+	actorlog.L.Info("call miner actor requestUpdateSectorPower")
 	if len(sectorsAdded)+len(sectorsRemoved) == 0 {
 		return
 	}
