@@ -2,6 +2,7 @@ package miner_test
 
 import (
 	"github.com/filecoin-project/specs-actors/actors/builtin"
+	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -60,4 +61,8 @@ func TestPledgePenaltyForTermination(t *testing.T) {
 				miner.InitialPledgeFactor))
 		assert.Equal(t, expectedFee, fee)
 	})
+}
+
+func Test_BlockReward(t *testing.T){
+	log.Println("the six year epoch is:",builtin.EpochsInYear*6)
 }
