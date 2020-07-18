@@ -93,3 +93,19 @@ func getState(rt *mock.Runtime) *reward.State {
 	rt.GetState(&st)
 	return &st
 }
+
+func Test_reward(t *testing.T) {
+	actor := rewardHarness{reward.Actor{}, t}
+	rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
+		WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
+		Build(t)
+	startRealizedPower := abi.NewStoragePower(0)
+	actor.constructAndVerify(rt, &startRealizedPower)
+	st := getState(rt)
+	st.Print()
+	currRealizedPower := abi.NewStoragePower(0)
+	for i:=0;i<=1000;i++{
+		actor.UpdateNetworkKPI(rt,&currRealizedPower)
+		currRealizedPower.Add(currRealizedPower,)
+	}
+}

@@ -3,6 +3,7 @@ package reward
 import (
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
+	"log"
 )
 
 var BaselinePowerAt = func(epoch abi.ChainEpoch) abi.StoragePower {
@@ -20,6 +21,7 @@ var BaselineTotal = big.Mul(big.NewInt(900e6), big.NewInt(1e18)) // 900M for tes
 // The effectiveNetworkTime argument is ceiling of theta.
 // The result is a fractional effectiveNetworkTime (theta) in Q.128 format.
 func computeRTheta(effectiveNetworkTime abi.ChainEpoch, cumsumRealized, cumsumBaseline big.Int) big.Int {
+	log.Println("computeRTheta the effectiveNetworkTime, cumsumRealized,cumsumBaseline is:",effectiveNetworkTime,cumsumRealized,cumsumBaseline)
 	var rewardTheta big.Int
 	if effectiveNetworkTime != 0 {
 		rewardTheta = big.NewInt(int64(effectiveNetworkTime)) // Q.0

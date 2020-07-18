@@ -3,6 +3,7 @@ package reward
 import (
 	"bytes"
 	"fmt"
+	"log"
 	gbig "math/big"
 	"testing"
 
@@ -58,8 +59,10 @@ func TestBaselineReward(t *testing.T) {
 	simple := computeReward(0, big.Zero(), big.Zero())
 
 	for i := 0; i < 512; i++ {
+		log.Println("the preTheta and theta is:",q128ToF(big.Int{Int: prevTheta}),q128ToF(big.Int{Int: theta}))
 		reward := computeReward(0, big.Int{Int: prevTheta}, big.Int{Int: theta})
 		reward = big.Sub(reward, simple)
+		log.Println("the base line reward is:",reward)
 		fmt.Fprintf(b, "%s,%s,%s\n", prevTheta, theta, reward.Int)
 		prevTheta = prevTheta.Add(prevTheta, step)
 		theta = theta.Add(theta, step)
