@@ -2,6 +2,7 @@ package reward_test
 
 import (
 	"context"
+	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -103,9 +104,20 @@ func Test_reward(t *testing.T) {
 	actor.constructAndVerify(rt, &startRealizedPower)
 	st := getState(rt)
 	st.Print()
-	currRealizedPower := abi.NewStoragePower(0)
-	for i:=0;i<=1000;i++{
-		actor.UpdateNetworkKPI(rt,&currRealizedPower)
-		currRealizedPower.Add(currRealizedPower,)
+
+	rt.SetCaller(builtin.StoragePowerActorAddr, builtin.StoragePowerActorCodeID)
+	rt.ExpectValidateCallerAny()
+	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
+	epochAddPower := reward.BaselinePowerAt(0)
+	epochAddPower = big.Div(epochAddPower,big.NewInt(2))
+//	epochAddPower = big.NewInt(0)
+	for i:=0;i<=100;i++{
+		rt.Call(actor.UpdateNetworkKPI,&epochAddPower)
+		//currRealizedPower=big.Add(currRealizedPower,epochAddPower)
+		//st.Print()
+		if i>=50{
+			epochAddPower = big.NewInt(0)
+		}
+		log.Println("")
 	}
 }

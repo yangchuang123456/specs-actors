@@ -58,6 +58,8 @@ func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
 	cappedRealizedPower := big.Min(BaselinePowerAt(st.Epoch), currRealizedPower)
 	st.CumsumRealized = big.Add(st.CumsumRealized, cappedRealizedPower)
 
+	log.Println("updateToNextEpoch the effectiveNetworkTime, cumsumRealized,cumsumBaseline is:",st.EffectiveNetworkTime,st.CumsumRealized,st.CumsumBaseline)
+
 	for st.CumsumRealized.GreaterThan(st.CumsumBaseline) {
 		st.EffectiveNetworkTime++
 		st.CumsumBaseline = big.Add(st.CumsumBaseline, BaselinePowerAt(st.EffectiveNetworkTime))
@@ -73,6 +75,7 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 
 	log.Println("updateToNextEpochWithReward the prevRewardTheta and  currRewardTheta is:", Q128ToF(prevRewardTheta), Q128ToF(currRewardTheta))
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
+	log.Println("updateToNextEpochWithReward ThisEpochReward is:",big.Div(st.ThisEpochReward, abi.TokenPrecision))
 }
 
 func Q128ToF(x big.Int) float64 {

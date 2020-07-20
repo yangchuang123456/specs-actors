@@ -2,9 +2,6 @@ package reward
 
 import (
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
-	"go.uber.org/zap"
-
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
 	builtin "github.com/filecoin-project/specs-actors/actors/builtin"
@@ -12,6 +9,9 @@ import (
 	exitcode "github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
 	. "github.com/filecoin-project/specs-actors/actors/util"
 	adt "github.com/filecoin-project/specs-actors/actors/util/adt"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
+	"log"
 )
 
 type Actor struct{}
@@ -110,7 +110,7 @@ func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *abi.TokenAmou
 // a schedule defined by non-empty tipsets, not by elapsed time/epochs.
 // This is not necessarily what we want, and may change.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
-	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
+	//rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
 	actorlog.L.Info("reward actor call update network kpi")
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
@@ -121,6 +121,7 @@ func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePo
 		actorlog.L.Info("the reward actor state before update is:",zap.Any("state",st))
 		// if there were null runs catch up the computation until
 		// st.Epoch == rt.CurrEpoch()
+		log.Println("the st epoch and rt currEpoch is:",st.Epoch,rt.CurrEpoch())
 		for st.Epoch < rt.CurrEpoch() {
 			// Update to next epoch to process null rounds
 			st.updateToNextEpoch(*currRealizedPower)
