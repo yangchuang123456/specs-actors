@@ -74,6 +74,7 @@ func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
 // Takes in a current realized power for a reward epoch and computes
 // and updates reward state to track reward for the next epoch
 func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower) {
+	log.Println("updateToNextEpochWithReward the currRealizedPower is:",currRealizedPower)
 	prevRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.CumsumRealized, st.CumsumBaseline)
 	st.updateToNextEpoch(currRealizedPower)
 	currRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.CumsumRealized, st.CumsumBaseline)
