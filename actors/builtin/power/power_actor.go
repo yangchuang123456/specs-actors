@@ -23,6 +23,10 @@ type Runtime = vmr.Runtime
 type SectorTermination int64
 
 const (
+	ErrTooManyProveCommits = exitcode.FirstActorSpecificExitCode + iota
+)
+
+const (
 	SectorTerminationExpired SectorTermination = iota // Implicit termination after all deals expire
 	SectorTerminationManual                           // Unscheduled explicit termination by the miner
 	SectorTerminationFaulty                           // Implicit termination due to unrecovered fault
@@ -176,6 +180,11 @@ func (a Actor) EnrollCronEvent(rt Runtime, params *EnrollCronEventParams) *adt.E
 		CallbackPayload: params.Payload,
 	}
 
+	// Ensure it is not possible to enter a large negative number which would cause problems in cron processing.
+	if params.EventEpoch < 0 {
+		rt.Abortf(exitcode.ErrIllegalArgument, "cron event epoch %d cannot be less than zero", params.EventEpoch)
+	}
+
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		err := st.appendCronEvent(adt.AsStore(rt), params.EventEpoch, &minerEvent)
@@ -202,11 +211,22 @@ func (a Actor) OnEpochTickEnd(rt Runtime, _ *adt.EmptyValue) *adt.EmptyValue {
 	var st State
 	rt.State().Readonly(&st)
 
+	// update next epoch's power and pledge values
+	// this must come before the next epoch's rewards are calculated
+	// so that next epoch reward reflects power added this epoch
+	rt.State().Transaction(&st, func() interface{} {
+		rawBytePower, qaPower := CurrentTotalPower(&st)
+		st.ThisEpochPledgeCollateral = st.TotalPledgeCollateral
+		st.ThisEpochQualityAdjPower = qaPower
+		st.ThisEpochRawBytePower = rawBytePower
+		return nil
+	})
+
 	// update network KPI in RewardActor
 	_, code := rt.Send(
 		builtin.RewardActorAddr,
 		builtin.MethodsReward.UpdateNetworkKPI,
-		&st.TotalRawBytePower,
+		&st.ThisEpochRawBytePower,
 		abi.NewTokenAmount(0),
 	)
 	builtin.RequireSuccess(rt, code, "failed to update network KPI with Reward Actor")
@@ -261,7 +281,6 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 
 	minerAddr := rt.Message().Caller()
 
-	rt.ChargeGas("OnSubmitVerifySeal", GasOnSubmitVerifySeal, 0)
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		store := adt.AsStore(rt)
@@ -276,6 +295,12 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 			}
 		}
 
+		arr, found, err := mmap.Get(adt.AddrKey(minerAddr))
+		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to get get seal verify infos at addr %s", minerAddr)
+		if found && arr.Length() >= MaxMinerProveCommitsPerEpoch {
+			rt.Abortf(ErrTooManyProveCommits, "miner %s attempting to prove commit over %d sectors in epoch", minerAddr, MaxMinerProveCommitsPerEpoch)
+		}
+
 		if err := mmap.Add(adt.AddrKey(minerAddr), sealInfo); err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to insert proof into set: %s", err)
 		}
@@ -284,6 +309,7 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 		if err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to flush proofs batch map: %s", err)
 		}
+		rt.ChargeGas("OnSubmitVerifySeal", GasOnSubmitVerifySeal, 0)
 		st.ProofValidationBatch = &mmrc
 		return nil
 	})
@@ -298,17 +324,18 @@ type CurrentTotalPowerReturn struct {
 }
 
 // Returns the total power and pledge recorded by the power actor.
-// TODO hold these values constant during an epoch for stable calculations, https://github.com/filecoin-project/specs-actors/issues/495
+// The returned values are frozen during the cron tick before this epoch
+// so that this method returns consistent values while processing all messages
+// of an epoch.
 func (a Actor) CurrentTotalPower(rt Runtime, _ *adt.EmptyValue) *CurrentTotalPowerReturn {
 	rt.ValidateImmediateCallerAcceptAny()
 	var st State
 	rt.State().Readonly(&st)
 
-	rawBytePower, qaPower := CurrentTotalPower(&st)
 	return &CurrentTotalPowerReturn{
-		RawBytePower:     rawBytePower,
-		QualityAdjPower:  qaPower,
-		PledgeCollateral: st.TotalPledgeCollateral,
+		RawBytePower:     st.ThisEpochRawBytePower,
+		QualityAdjPower:  st.ThisEpochQualityAdjPower,
+		PledgeCollateral: st.ThisEpochPledgeCollateral,
 	}
 }
 
@@ -410,7 +437,7 @@ func (a Actor) processDeferredCronEvents(rt Runtime) error {
 	rt.State().Transaction(&st, func() interface{} {
 		store := adt.AsStore(rt)
 
-		for epoch := st.LastEpochTick + 1; epoch <= rtEpoch; epoch++ {
+		for epoch := st.FirstCronEpoch; epoch <= rtEpoch; epoch++ {
 			epochEvents, err := st.loadCronEvents(store, epoch)
 			if err != nil {
 				return errors.Wrapf(err, "failed to load cron events at %v", epoch)
@@ -426,7 +453,7 @@ func (a Actor) processDeferredCronEvents(rt Runtime) error {
 			}
 		}
 
-		st.LastEpochTick = rtEpoch
+		st.FirstCronEpoch = rtEpoch + 1
 		return nil
 	})
 	failedMinerCrons := make([]addr.Address, 0)

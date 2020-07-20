@@ -21,15 +21,23 @@ type State struct {
 	// TotalQABytesCommitted includes claims from miners below min power threshold
 	TotalQABytesCommitted abi.StoragePower
 	TotalPledgeCollateral abi.TokenAmount
-	MinerCount            int64
+
+	// These fields are set once per epoch in the previous cron tick and used
+	// for consistent values across a single epoch's state transition.
+	ThisEpochRawBytePower     abi.StoragePower
+	ThisEpochQualityAdjPower  abi.StoragePower
+	ThisEpochPledgeCollateral abi.TokenAmount
+
+	MinerCount int64
 	// Number of miners having proven the minimum consensus power.
 	MinerAboveMinPowerCount int64
 
 	// A queue of events to be triggered by cron, indexed by epoch.
 	CronEventQueue cid.Cid // Multimap, (HAMT[ChainEpoch]AMT[CronEvent]
 
-	// Last chain epoch OnEpochTickEnd was called on
-	LastEpochTick abi.ChainEpoch
+	// First epoch in which a cron task may be stored.
+	// Cron will iterate every epoch between this and the current epoch inclusively to find tasks to execute.
+	FirstCronEpoch abi.ChainEpoch
 
 	// Claimed power for each miner.
 	Claims cid.Cid // Map, HAMT[address]Claim
@@ -54,16 +62,19 @@ type AddrKey = adt.AddrKey
 
 func ConstructState(emptyMapCid, emptyMMapCid cid.Cid) *State {
 	return &State{
-		TotalRawBytePower:       abi.NewStoragePower(0),
-		TotalBytesCommitted:     abi.NewStoragePower(0),
-		TotalQualityAdjPower:    abi.NewStoragePower(0),
-		TotalQABytesCommitted:   abi.NewStoragePower(0),
-		TotalPledgeCollateral:   abi.NewTokenAmount(0),
-		LastEpochTick:           -1,
-		CronEventQueue:          emptyMapCid,
-		Claims:                  emptyMapCid,
-		MinerCount:              0,
-		MinerAboveMinPowerCount: 0,
+		TotalRawBytePower:         abi.NewStoragePower(0),
+		TotalBytesCommitted:       abi.NewStoragePower(0),
+		TotalQualityAdjPower:      abi.NewStoragePower(0),
+		TotalQABytesCommitted:     abi.NewStoragePower(0),
+		TotalPledgeCollateral:     abi.NewTokenAmount(0),
+		ThisEpochRawBytePower:     abi.NewStoragePower(0),
+		ThisEpochQualityAdjPower:  abi.NewStoragePower(0),
+		ThisEpochPledgeCollateral: abi.NewTokenAmount(0),
+		FirstCronEpoch:            0,
+		CronEventQueue:            emptyMapCid,
+		Claims:                    emptyMapCid,
+		MinerCount:                0,
+		MinerAboveMinPowerCount:   0,
 	}
 }
 
@@ -88,7 +99,7 @@ func (st *State) MinerNominalPowerMeetsConsensusMinimum(s adt.Store, miner addr.
 	}
 
 	// otherwise, if ConsensusMinerMinMiners miners meet min power requirement, return false
-	if st.MinerAboveMinPowerCount > ConsensusMinerMinMiners {
+	if st.MinerAboveMinPowerCount >= ConsensusMinerMinMiners {
 		return false, nil
 	}
 
@@ -166,6 +177,11 @@ func (st *State) appendCronEvent(store adt.Store, epoch abi.ChainEpoch, event *C
 	mmap, err := adt.AsMultimap(store, st.CronEventQueue)
 	if err != nil {
 		return err
+	}
+
+	// if event is in past, alter FirstCronEpoch so it will be found.
+	if epoch < st.FirstCronEpoch {
+		st.FirstCronEpoch = epoch
 	}
 
 	err = mmap.Add(epochKey(epoch), event)

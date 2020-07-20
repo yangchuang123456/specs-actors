@@ -78,6 +78,11 @@ func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) 
 
 	totalReward := big.Add(blockReward, params.GasReward)
 
+	if totalReward.GreaterThan(rt.CurrentBalance()) {
+		rt.Log(vmr.WARN, "reward actor balance %d below totalReward expected %d, paying out rest of balance", rt.CurrentBalance(), totalReward)
+		totalReward = rt.CurrentBalance()
+	}
+
 	// Cap the penalty at the total reward value.
 	penalty = big.Min(params.Penalty, totalReward)
 
@@ -91,24 +96,36 @@ func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) 
 	builtin.RequireSuccess(rt, code, "failed to send reward to miner: %s", minerAddr)
 
 	// Burn the penalty amount.
-	_, code = rt.Send(builtin.BurntFundsActorAddr, builtin.MethodSend, nil, penalty)
-	builtin.RequireSuccess(rt, code, "failed to send penalty to burnt funds actor")
+	if penalty.GreaterThan(abi.NewTokenAmount(0)) {
+		_, code = rt.Send(builtin.BurntFundsActorAddr, builtin.MethodSend, nil, penalty)
+		builtin.RequireSuccess(rt, code, "failed to send penalty to burnt funds actor")
+	}
 
 	return nil
 }
 
-func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *abi.TokenAmount {
+type ThisEpochRewardReturn struct {
+	ThisEpochReward        abi.TokenAmount
+	ThisEpochBaselinePower abi.StoragePower
+}
+
+// The award value used for the current epoch, updated at the end of an epoch
+// through cron tick.  In the case previous epochs were null blocks this
+// is the reward value as calculated at the last non-null epoch.
+func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *ThisEpochRewardReturn {
 	rt.ValidateImmediateCallerAcceptAny()
 
 	var st State
 	rt.State().Readonly(&st)
-	return &st.ThisEpochReward
+	return &ThisEpochRewardReturn{
+		ThisEpochReward:        st.ThisEpochReward,
+		ThisEpochBaselinePower: st.ThisEpochBaselinePower,
+	}
 }
 
 // Called at the end of each epoch by the power actor (in turn by its cron hook).
-// This is only invoked for non-empty tipsets. The impact of this is that block rewards are paid out over
-// a schedule defined by non-empty tipsets, not by elapsed time/epochs.
-// This is not necessarily what we want, and may change.
+// This is only invoked for non-empty tipsets, but catches up any number of null
+// epochs to compute the next epoch reward.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	//rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
 	actorlog.L.Info("reward actor call update network kpi")

@@ -29,7 +29,11 @@ type State struct {
 
 	// The reward to be paid in per WinCount to block producers.
 	// The actual reward total paid out depends on the number of winners in any round.
+	// This value is recomputed every non-null epoch and used in the next non-null epoch.
 	ThisEpochReward abi.TokenAmount
+
+	// The baseline power the network is targeting at st.Epoch
+	ThisEpochBaselinePower abi.StoragePower
 
 	// Epoch tracks for which epoch the Reward was computed
 	Epoch abi.ChainEpoch
@@ -41,8 +45,9 @@ func ConstructState(currRealizedPower abi.StoragePower) *State {
 		CumsumRealized:       big.Zero(),
 		EffectiveNetworkTime: 0,
 
-		ThisEpochReward: big.Zero(),
-		Epoch:           -1,
+		ThisEpochReward:        big.Zero(),
+		ThisEpochBaselinePower: big.Zero(),
+		Epoch:                  -1,
 	}
 
 	st.updateToNextEpochWithReward(currRealizedPower)
@@ -58,7 +63,7 @@ func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
 	cappedRealizedPower := big.Min(BaselinePowerAt(st.Epoch), currRealizedPower)
 	st.CumsumRealized = big.Add(st.CumsumRealized, cappedRealizedPower)
 
-	log.Println("updateToNextEpoch the effectiveNetworkTime, cumsumRealized,cumsumBaseline is:",st.EffectiveNetworkTime,st.CumsumRealized,st.CumsumBaseline)
+	log.Println("updateToNextEpoch the effectiveNetworkTime, cumsumRealized,cumsumBaseline is:", st.EffectiveNetworkTime, st.CumsumRealized, st.CumsumBaseline)
 
 	for st.CumsumRealized.GreaterThan(st.CumsumBaseline) {
 		st.EffectiveNetworkTime++
@@ -75,7 +80,9 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 
 	log.Println("updateToNextEpochWithReward the prevRewardTheta and  currRewardTheta is:", Q128ToF(prevRewardTheta), Q128ToF(currRewardTheta))
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
-	log.Println("updateToNextEpochWithReward ThisEpochReward is:",big.Div(st.ThisEpochReward, abi.TokenPrecision))
+
+	st.ThisEpochBaselinePower = BaselinePowerAt(st.Epoch)
+	log.Println("updateToNextEpochWithReward ThisEpochReward is:", big.Div(st.ThisEpochReward, abi.TokenPrecision))
 }
 
 func Q128ToF(x big.Int) float64 {

@@ -13,14 +13,18 @@ import (
 
 var _ = xerrors.Errorf
 
+var lengthBufState = []byte{134}
+
 func (t *State) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{133}); err != nil {
+	if _, err := w.Write(lengthBufState); err != nil {
 		return err
 	}
+
+	scratch := make([]byte, 9)
 
 	// t.CumsumBaseline (big.Int) (struct)
 	if err := t.CumsumBaseline.MarshalCBOR(w); err != nil {
@@ -34,11 +38,11 @@ func (t *State) MarshalCBOR(w io.Writer) error {
 
 	// t.EffectiveNetworkTime (abi.ChainEpoch) (int64)
 	if t.EffectiveNetworkTime >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.EffectiveNetworkTime))); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.EffectiveNetworkTime)); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.EffectiveNetworkTime)-1)); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajNegativeInt, uint64(-t.EffectiveNetworkTime-1)); err != nil {
 			return err
 		}
 	}
@@ -48,13 +52,18 @@ func (t *State) MarshalCBOR(w io.Writer) error {
 		return err
 	}
 
+	// t.ThisEpochBaselinePower (big.Int) (struct)
+	if err := t.ThisEpochBaselinePower.MarshalCBOR(w); err != nil {
+		return err
+	}
+
 	// t.Epoch (abi.ChainEpoch) (int64)
 	if t.Epoch >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.Epoch))); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.Epoch)); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.Epoch)-1)); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajNegativeInt, uint64(-t.Epoch-1)); err != nil {
 			return err
 		}
 	}
@@ -62,9 +71,12 @@ func (t *State) MarshalCBOR(w io.Writer) error {
 }
 
 func (t *State) UnmarshalCBOR(r io.Reader) error {
-	br := cbg.GetPeeker(r)
+	*t = State{}
 
-	maj, extra, err := cbg.CborReadHeader(br)
+	br := cbg.GetPeeker(r)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
 	}
@@ -72,7 +84,7 @@ func (t *State) UnmarshalCBOR(r io.Reader) error {
 		return fmt.Errorf("cbor input should be of type array")
 	}
 
-	if extra != 5 {
+	if extra != 6 {
 		return fmt.Errorf("cbor input had wrong number of fields")
 	}
 
@@ -96,7 +108,7 @@ func (t *State) UnmarshalCBOR(r io.Reader) error {
 	}
 	// t.EffectiveNetworkTime (abi.ChainEpoch) (int64)
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
+		maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 		var extraI int64
 		if err != nil {
 			return err
@@ -128,9 +140,18 @@ func (t *State) UnmarshalCBOR(r io.Reader) error {
 		}
 
 	}
+	// t.ThisEpochBaselinePower (big.Int) (struct)
+
+	{
+
+		if err := t.ThisEpochBaselinePower.UnmarshalCBOR(br); err != nil {
+			return xerrors.Errorf("unmarshaling t.ThisEpochBaselinePower: %w", err)
+		}
+
+	}
 	// t.Epoch (abi.ChainEpoch) (int64)
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
+		maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 		var extraI int64
 		if err != nil {
 			return err
@@ -156,14 +177,18 @@ func (t *State) UnmarshalCBOR(r io.Reader) error {
 	return nil
 }
 
+var lengthBufAwardBlockRewardParams = []byte{132}
+
 func (t *AwardBlockRewardParams) MarshalCBOR(w io.Writer) error {
 	if t == nil {
 		_, err := w.Write(cbg.CborNull)
 		return err
 	}
-	if _, err := w.Write([]byte{132}); err != nil {
+	if _, err := w.Write(lengthBufAwardBlockRewardParams); err != nil {
 		return err
 	}
+
+	scratch := make([]byte, 9)
 
 	// t.Miner (address.Address) (struct)
 	if err := t.Miner.MarshalCBOR(w); err != nil {
@@ -182,11 +207,11 @@ func (t *AwardBlockRewardParams) MarshalCBOR(w io.Writer) error {
 
 	// t.WinCount (int64) (int64)
 	if t.WinCount >= 0 {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajUnsignedInt, uint64(t.WinCount))); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajUnsignedInt, uint64(t.WinCount)); err != nil {
 			return err
 		}
 	} else {
-		if _, err := w.Write(cbg.CborEncodeMajorType(cbg.MajNegativeInt, uint64(-t.WinCount)-1)); err != nil {
+		if err := cbg.WriteMajorTypeHeaderBuf(scratch, w, cbg.MajNegativeInt, uint64(-t.WinCount-1)); err != nil {
 			return err
 		}
 	}
@@ -194,9 +219,12 @@ func (t *AwardBlockRewardParams) MarshalCBOR(w io.Writer) error {
 }
 
 func (t *AwardBlockRewardParams) UnmarshalCBOR(r io.Reader) error {
-	br := cbg.GetPeeker(r)
+	*t = AwardBlockRewardParams{}
 
-	maj, extra, err := cbg.CborReadHeader(br)
+	br := cbg.GetPeeker(r)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 	if err != nil {
 		return err
 	}
@@ -237,7 +265,7 @@ func (t *AwardBlockRewardParams) UnmarshalCBOR(r io.Reader) error {
 	}
 	// t.WinCount (int64) (int64)
 	{
-		maj, extra, err := cbg.CborReadHeader(br)
+		maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
 		var extraI int64
 		if err != nil {
 			return err
@@ -259,6 +287,68 @@ func (t *AwardBlockRewardParams) UnmarshalCBOR(r io.Reader) error {
 		}
 
 		t.WinCount = int64(extraI)
+	}
+	return nil
+}
+
+var lengthBufThisEpochRewardReturn = []byte{130}
+
+func (t *ThisEpochRewardReturn) MarshalCBOR(w io.Writer) error {
+	if t == nil {
+		_, err := w.Write(cbg.CborNull)
+		return err
+	}
+	if _, err := w.Write(lengthBufThisEpochRewardReturn); err != nil {
+		return err
+	}
+
+	// t.ThisEpochReward (big.Int) (struct)
+	if err := t.ThisEpochReward.MarshalCBOR(w); err != nil {
+		return err
+	}
+
+	// t.ThisEpochBaselinePower (big.Int) (struct)
+	if err := t.ThisEpochBaselinePower.MarshalCBOR(w); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *ThisEpochRewardReturn) UnmarshalCBOR(r io.Reader) error {
+	*t = ThisEpochRewardReturn{}
+
+	br := cbg.GetPeeker(r)
+	scratch := make([]byte, 8)
+
+	maj, extra, err := cbg.CborReadHeaderBuf(br, scratch)
+	if err != nil {
+		return err
+	}
+	if maj != cbg.MajArray {
+		return fmt.Errorf("cbor input should be of type array")
+	}
+
+	if extra != 2 {
+		return fmt.Errorf("cbor input had wrong number of fields")
+	}
+
+	// t.ThisEpochReward (big.Int) (struct)
+
+	{
+
+		if err := t.ThisEpochReward.UnmarshalCBOR(br); err != nil {
+			return xerrors.Errorf("unmarshaling t.ThisEpochReward: %w", err)
+		}
+
+	}
+	// t.ThisEpochBaselinePower (big.Int) (struct)
+
+	{
+
+		if err := t.ThisEpochBaselinePower.UnmarshalCBOR(br); err != nil {
+			return xerrors.Errorf("unmarshaling t.ThisEpochBaselinePower: %w", err)
+		}
+
 	}
 	return nil
 }
