@@ -130,8 +130,8 @@ func Test_reward(t *testing.T) {
 	rt.ExpectValidateCallerAny()
 	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
 	epochAddPower := reward.BaselinePowerAt(0)
-//	epochAddPower = big.Div(epochAddPower,big.NewInt(2))
-	epochAddPower = big.Mul(epochAddPower,big.NewInt(2))
+	epochAddPower = big.Div(epochAddPower,big.NewInt(2))
+	//epochAddPower = big.Mul(epochAddPower,big.NewInt(2))
 	log.Println("the epochAddPower is:",epochAddPower)
 //	epochAddPower = big.NewInt(0)
 	for i:=0;i<=100;i++{

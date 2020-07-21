@@ -69,7 +69,6 @@ func computeReward(epoch abi.ChainEpoch, prevTheta, currTheta big.Int) abi.Token
 func computeBaselineSupply(theta big.Int) big.Int {
 	thetaLam := big.Mul(theta, lambda)      // Q.128 * Q.128 => Q.256
 	thetaLam = big.Rsh(thetaLam, precision) // Q.256 >> 128 => Q.128
-
 	eTL := big.Int{Int: expneg(thetaLam.Int)} // Q.128
 
 	one := big.NewInt(1)
