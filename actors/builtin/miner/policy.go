@@ -5,6 +5,9 @@ import (
 	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
 	"go.uber.org/zap"
 
+	"github.com/ipfs/go-cid"
+	mh "github.com/multiformats/go-multihash"
+
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
 	builtin "github.com/filecoin-project/specs-actors/actors/builtin"
@@ -56,6 +59,13 @@ const NewSectorsPerPeriodMax = 128 << 10
 
 // Epochs after which chain state is final.
 const ChainFinality = abi.ChainEpoch(900)
+
+var SealedCIDPrefix = cid.Prefix{
+	Version:  1,
+	Codec:    cid.FilCommitmentSealed,
+	MhType:   mh.POSEIDON_BLS12_381_A1_FC1,
+	MhLength: 32,
+}
 
 // List of proof types which can be used when creating new miner actors
 var SupportedProofTypes = map[abi.RegisteredSealProof]struct{}{
