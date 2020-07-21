@@ -1,8 +1,12 @@
 package reward
 
 import (
+	"bytes"
+	"encoding/json"
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
+	"go.uber.org/zap"
+	"log"
 )
 
 // A quantity of space * time (in byte-epochs) representing power committed to the network for some duration.
@@ -78,4 +82,17 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
 
+}
+
+func (st *State) Print() {
+	log.Println("the reward state is:")
+	st.ThisEpochReward = big.Div(st.ThisEpochReward, abi.TokenPrecision)
+	byte, err := json.Marshal(st)
+	if err != nil {
+		log.Println("reward state json marshal error:", zap.String("error", err.Error()))
+	}
+	var out bytes.Buffer
+	json.Indent(&out, byte, "", "\t")
+	log.Println(out.String())
+	log.Println("")
 }

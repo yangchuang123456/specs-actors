@@ -130,18 +130,18 @@ func Test_reward(t *testing.T) {
 	rt.SetCaller(builtin.StoragePowerActorAddr, builtin.StoragePowerActorCodeID)
 	rt.ExpectValidateCallerAny()
 	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
-	epochAddPower := reward.BaselinePowerAt(0)
-	epochAddPower = big.Div(epochAddPower,big.NewInt(2))
-	//epochAddPower = big.Mul(epochAddPower,big.NewInt(2))
-	log.Println("the epochAddPower is:",epochAddPower)
+	currRealizedPower := reward.BaselinePowerNextEpoch(reward.BaselineInitialValue)
+	log.Println("the currRealizedPower is:",currRealizedPower)
 	//	epochAddPower = big.NewInt(0)
-	for i:=0;i<=100;i++{
-		rt.Call(actor.UpdateNetworkKPI,&epochAddPower)
+	for i:=1;i<=100;i++{
+
+		rt.Call(actor.UpdateNetworkKPI,&currRealizedPower)
 		//currRealizedPower=big.Add(currRealizedPower,epochAddPower)
-		//st.Print()
-		if i>=50{
-			epochAddPower = big.NewInt(0)
-		}
+		st.Print()
+/*		if i>=50{
+			currRealizedPower = big.NewInt(0)
+		}*/
+		currRealizedPower = reward.BaselinePowerNextEpoch(currRealizedPower)
 		log.Println("")
 	}
 }
