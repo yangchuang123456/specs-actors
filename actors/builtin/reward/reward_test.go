@@ -2,6 +2,7 @@ package reward_test
 
 import (
 	"context"
+	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -116,3 +117,31 @@ func getState(rt *mock.Runtime) *reward.State {
 }
 
 
+func Test_reward(t *testing.T) {
+	actor := rewardHarness{reward.Actor{}, t}
+	rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
+		WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
+		Build(t)
+	startRealizedPower := abi.NewStoragePower(0)
+	actor.constructAndVerify(rt, &startRealizedPower)
+	st := getState(rt)
+	st.Print()
+
+	rt.SetCaller(builtin.StoragePowerActorAddr, builtin.StoragePowerActorCodeID)
+	rt.ExpectValidateCallerAny()
+	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
+	epochAddPower := reward.BaselinePowerAt(0)
+	epochAddPower = big.Div(epochAddPower,big.NewInt(2))
+	//epochAddPower = big.Mul(epochAddPower,big.NewInt(2))
+	log.Println("the epochAddPower is:",epochAddPower)
+	//	epochAddPower = big.NewInt(0)
+	for i:=0;i<=100;i++{
+		rt.Call(actor.UpdateNetworkKPI,&epochAddPower)
+		//currRealizedPower=big.Add(currRealizedPower,epochAddPower)
+		//st.Print()
+		if i>=50{
+			epochAddPower = big.NewInt(0)
+		}
+		log.Println("")
+	}
+}
