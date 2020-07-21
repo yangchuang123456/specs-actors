@@ -33,16 +33,14 @@ func (t *BalanceTable) Root() (cid.Cid, error) {
 }
 
 // Gets the balance for a key. The entry must have been previously initialized.
-func (t *BalanceTable) Get(key addr.Address) (abi.TokenAmount, error) {
+func (t *BalanceTable) Get(key addr.Address) (abi.TokenAmount, bool, error) {
 	var value abi.TokenAmount
 	found, err := (*Map)(t).Get(AddrKey(key), &value)
-	if err != nil {
-		return big.Zero(), err // The errors from Map carry good information, no need to wrap here.
+	if !found || err != nil {
+		value = big.Zero()
 	}
-	if !found {
-		return big.Zero(), ErrNotFound{t.lastCid, key}
-	}
-	return value, nil
+
+	return value, found, err
 }
 
 // Has checks if the balance for a key exists
@@ -51,16 +49,14 @@ func (t *BalanceTable) Has(key addr.Address) (bool, error) {
 	return (*Map)(t).Get(AddrKey(key), &value)
 }
 
-// Sets the balance for an address, overwriting any previous balance.
-func (t *BalanceTable) Set(key addr.Address, value abi.TokenAmount) error {
-	return (*Map)(t).Put(AddrKey(key), &value)
-}
-
 // Adds an amount to a balance. The entry must have been previously initialized.
 func (t *BalanceTable) Add(key addr.Address, value abi.TokenAmount) error {
-	prev, err := t.Get(key)
+	prev, found, err := t.Get(key)
 	if err != nil {
 		return err
+	}
+	if !found {
+		return ErrNotFound{t.lastCid, key}
 	}
 	sum := big.Add(prev, value)
 	return (*Map)(t).Put(AddrKey(key), &sum)
@@ -83,10 +79,14 @@ func (t *BalanceTable) AddCreate(key addr.Address, value abi.TokenAmount) error 
 // Subtracts up to the specified amount from a balance, without reducing the balance below some minimum.
 // Returns the amount subtracted (always positive or zero).
 func (t *BalanceTable) SubtractWithMinimum(key addr.Address, req abi.TokenAmount, floor abi.TokenAmount) (abi.TokenAmount, error) {
-	prev, err := t.Get(key)
+	prev, found, err := t.Get(key)
 	if err != nil {
 		return big.Zero(), err
 	}
+	if !found {
+		return big.Zero(), ErrNotFound{t.lastCid, key}
+	}
+
 	available := big.Max(big.Zero(), big.Sub(prev, floor))
 	sub := big.Min(available, req)
 	if sub.Sign() > 0 {
@@ -98,6 +98,8 @@ func (t *BalanceTable) SubtractWithMinimum(key addr.Address, req abi.TokenAmount
 	return sub, nil
 }
 
+// MustSubtract subtracts the given amount from the account's balance
+// returns an error if account isn't created or if it has insufficient balance
 func (t *BalanceTable) MustSubtract(key addr.Address, req abi.TokenAmount) error {
 	subst, err := t.SubtractWithMinimum(key, req, big.Zero())
 	if err != nil {
@@ -107,19 +109,6 @@ func (t *BalanceTable) MustSubtract(key addr.Address, req abi.TokenAmount) error
 		return errors.New("couldn't subtract the requested amount")
 	}
 	return nil
-}
-
-// Removes an entry from the table, returning the prior value. The entry must have been previously initialized.
-func (t *BalanceTable) Remove(key addr.Address) (abi.TokenAmount, error) {
-	prev, err := t.Get(key)
-	if err != nil {
-		return big.Zero(), err
-	}
-	err = (*Map)(t).Delete(AddrKey(key))
-	if err != nil {
-		return big.Zero(), err
-	}
-	return prev, nil
 }
 
 // Returns the total balance held by this BalanceTable

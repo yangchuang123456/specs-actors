@@ -21,11 +21,32 @@ func TestExports(t *testing.T) {
 func TestConstructor(t *testing.T) {
 	actor := rewardHarness{reward.Actor{}, t}
 
-	rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
-		WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
-		Build(t)
+	t.Run("construct with 0 power", func(t *testing.T) {
+		rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
+			WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
+			Build(t)
+		startRealizedPower := abi.NewStoragePower(0)
+		actor.constructAndVerify(rt, &startRealizedPower)
+		st := getState(rt)
+		assert.Equal(t, abi.ChainEpoch(0), st.Epoch)
+		assert.Equal(t, abi.NewStoragePower(0), st.CumsumRealized)
+		assert.Equal(t, big.MustFromString("9152074749760199658"), st.ThisEpochReward)
+	})
+	t.Run("construct with some power", func(t *testing.T) {
+		rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
+			WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
+			Build(t)
+		startRealizedPower := big.Lsh(abi.NewStoragePower(1), 39)
+		actor.constructAndVerify(rt, &startRealizedPower)
+		st := getState(rt)
+		assert.Equal(t, abi.ChainEpoch(0), st.Epoch)
+		assert.Equal(t, startRealizedPower, st.CumsumRealized)
 
-	actor.constructAndVerify(rt)
+		// Note this check is sensative to the value of startRealizedPower and the minting function
+		// so it is somewhat brittle. Values of startRealizedPower below 1<<20 mint no coins
+		assert.NotEqual(t, big.Zero(), st.ThisEpochReward)
+		assert.Equal(t, big.MustFromString("50336408296765376121"), st.ThisEpochReward)
+	})
 }
 
 func TestAwardBlockReward(t *testing.T) {
@@ -35,7 +56,8 @@ func TestAwardBlockReward(t *testing.T) {
 
 	t.Run("assertion failure when current balance is less than gas reward", func(t *testing.T) {
 		rt := builder.Build(t)
-		actor.constructAndVerify(rt)
+		startRealizedPower := abi.NewStoragePower(0)
+		actor.constructAndVerify(rt, &startRealizedPower)
 		miner := tutil.NewIDAddr(t, 1000)
 
 		gasreward := abi.NewTokenAmount(10)
@@ -47,7 +69,28 @@ func TestAwardBlockReward(t *testing.T) {
 				Miner:     miner,
 				Penalty:   big.Zero(),
 				GasReward: gasreward,
+				WinCount:  1,
 			})
+		})
+		rt.Verify()
+	})
+
+	t.Run("pays out current balance when reward exceeds total balance", func(t *testing.T) {
+		rt := builder.Build(t)
+		startRealizedPower := abi.NewStoragePower(1)
+		actor.constructAndVerify(rt, &startRealizedPower)
+		miner := tutil.NewIDAddr(t, 1000)
+
+		// Total reward is a huge number, upon writing ~1e18, so 300 should be way less
+		smallReward := abi.NewTokenAmount(300)
+		rt.SetBalance(smallReward)
+		rt.ExpectValidateCallerAddr(builtin.SystemActorAddr)
+		rt.ExpectSend(miner, builtin.MethodsMiner.AddLockedFund, &smallReward, smallReward, nil, 0)
+		rt.Call(actor.AwardBlockReward, &reward.AwardBlockRewardParams{
+			Miner:     miner,
+			Penalty:   big.Zero(),
+			GasReward: big.Zero(),
+			WinCount:  1,
 		})
 		rt.Verify()
 	})
@@ -58,10 +101,16 @@ type rewardHarness struct {
 	t testing.TB
 }
 
-func (h *rewardHarness) constructAndVerify(rt *mock.Runtime) {
+func (h *rewardHarness) constructAndVerify(rt *mock.Runtime, currRawPower *abi.StoragePower) {
 	rt.ExpectValidateCallerAddr(builtin.SystemActorAddr)
-	ret := rt.Call(h.Constructor, nil)
+	ret := rt.Call(h.Constructor, currRawPower)
 	assert.Nil(h.t, ret)
 	rt.Verify()
 
+}
+
+func getState(rt *mock.Runtime) *reward.State {
+	var st reward.State
+	rt.GetState(&st)
+	return &st
 }

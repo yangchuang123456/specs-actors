@@ -44,7 +44,8 @@ func NewBuilder(ctx context.Context, receiver addr.Address) *RuntimeBuilder {
 		expectValidateCallerType: nil,
 		expectCreateActor:        nil,
 
-		expectSends: make([]*expectedMessage, 0),
+		expectSends:      make([]*expectedMessage, 0),
+		expectVerifySigs: make([]*expectVerifySig, 0),
 	}
 	return &RuntimeBuilder{m}
 }
@@ -55,7 +56,7 @@ func (b *RuntimeBuilder) Build(t testing.TB) *Runtime {
 
 	// Deep copy the mutable values.
 	cpy.store = make(map[cid.Cid][]byte)
-	for k, v := range b.rt.store {
+	for k, v := range b.rt.store { //nolint:nomaprange
 		cpy.store[k] = v
 	}
 

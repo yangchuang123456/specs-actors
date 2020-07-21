@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime/debug"
+	"strings"
 	"testing"
 
 	"github.com/filecoin-project/go-address"
@@ -50,18 +51,23 @@ type Runtime struct {
 	hashfunc func(data []byte) [32]byte
 
 	// Expectations
-	t                          testing.TB
-	expectValidateCallerAny    bool
-	expectValidateCallerAddr   []addr.Address
-	expectValidateCallerType   []cid.Cid
-	expectRandomness           []*expectRandomness
-	expectSends                []*expectedMessage
-	expectCreateActor          *expectCreateActor
-	expectVerifySig            *expectVerifySig
-	expectVerifySeal           *expectVerifySeal
-	expectVerifyPoSt           *expectVerifyPoSt
-	expectVerifyConsensusFault *expectVerifyConsensusFault
-	expectDeleteActor          *address.Address
+	t                              testing.TB
+	expectValidateCallerAny        bool
+	expectValidateCallerAddr       []addr.Address
+	expectValidateCallerType       []cid.Cid
+	expectRandomness               []*expectRandomness
+	expectSends                    []*expectedMessage
+	expectVerifySigs               []*expectVerifySig
+	expectCreateActor              *expectCreateActor
+	expectVerifySeal               *expectVerifySeal
+	expectComputeUnsealedSectorCID *expectComputeUnsealedSectorCID
+	expectVerifyPoSt               *expectVerifyPoSt
+	expectVerifyConsensusFault     *expectVerifyConsensusFault
+	expectDeleteActor              *address.Address
+
+	logs []string
+	// Gas charged explicitly through rt.ChargeGas. Note: most charges are implicit
+	gasCharged int64
 }
 
 type expectRandomness struct {
@@ -97,6 +103,13 @@ type expectVerifySig struct {
 type expectVerifySeal struct {
 	seal   abi.SealVerifyInfo
 	result error
+}
+
+type expectComputeUnsealedSectorCID struct {
+	reg       abi.RegisteredSealProof
+	pieces    []abi.PieceInfo
+	cid       cid.Cid
+	resultErr error
 }
 
 type expectVerifyPoSt struct {
@@ -449,7 +462,11 @@ func (rt *Runtime) Transaction(st runtime.CBORer, f func() interface{}) interfac
 ///// Syscalls implementation /////
 
 func (rt *Runtime) VerifySignature(sig crypto.Signature, signer addr.Address, plaintext []byte) error {
-	exp := rt.expectVerifySig
+	if len(rt.expectVerifySigs) == 0 {
+		rt.failTest("unexpected signature verification sig: %v, signer: %s, plaintext: %v", sig, signer, plaintext)
+	}
+
+	exp := rt.expectVerifySigs[0]
 	if exp != nil {
 		if !exp.sig.Equals(&sig) || exp.signer != signer || !bytes.Equal(exp.plaintext, plaintext) {
 			rt.failTest("unexpected signature verification\n"+
@@ -458,7 +475,7 @@ func (rt *Runtime) VerifySignature(sig crypto.Signature, signer addr.Address, pl
 				sig, signer, plaintext, exp.sig, exp.signer, exp.plaintext)
 		}
 		defer func() {
-			rt.expectVerifySig = nil
+			rt.expectVerifySigs = rt.expectVerifySigs[1:]
 		}()
 		return exp.result
 	}
@@ -471,7 +488,22 @@ func (rt *Runtime) HashBlake2b(data []byte) [32]byte {
 }
 
 func (rt *Runtime) ComputeUnsealedSectorCID(reg abi.RegisteredSealProof, pieces []abi.PieceInfo) (cid.Cid, error) {
-	panic("implement me")
+	exp := rt.expectComputeUnsealedSectorCID
+	if exp != nil {
+		if !reflect.DeepEqual(exp.reg, reg) {
+			rt.failTest("unexpected ComputeUnsealedSectorCID proof, expected: %v, got: %v", exp.reg, reg)
+		}
+		if !reflect.DeepEqual(exp.pieces, pieces) {
+			rt.failTest("unexpected ComputeUnsealedSectorCID pieces, expected: %v, got: %v", exp.pieces, pieces)
+		}
+
+		defer func() {
+			rt.expectComputeUnsealedSectorCID = nil
+		}()
+		return exp.cid, exp.resultErr
+	}
+	rt.failTestNow("unexpected syscall to ComputeUnsealedSectorCID %v", reg)
+	return cid.Cid{}, nil
 }
 
 func (rt *Runtime) VerifySeal(seal abi.SealVerifyInfo) error {
@@ -494,7 +526,7 @@ func (rt *Runtime) VerifySeal(seal abi.SealVerifyInfo) error {
 
 func (rt *Runtime) BatchVerifySeals(vis map[address.Address][]abi.SealVerifyInfo) (map[address.Address][]bool, error) {
 	out := make(map[address.Address][]bool)
-	for k, v := range vis {
+	for k, v := range vis { //nolint:nomaprange
 		validations := make([]bool, len(v))
 		for i := range validations {
 			validations[i] = true
@@ -544,6 +576,10 @@ func (rt *Runtime) VerifyConsensusFault(h1, h2, extra []byte) (*runtime.Consensu
 	err := rt.expectVerifyConsensusFault.Err
 	rt.expectVerifyConsensusFault = nil
 	return fault, err
+}
+
+func (rt *Runtime) Log(level runtime.LogLevel, msg string, args ...interface{}) {
+	rt.logs = append(rt.logs, fmt.Sprintf(msg, args...))
 }
 
 ///// Trace span implementation /////
@@ -598,6 +634,10 @@ func (rt *Runtime) Epoch() abi.ChainEpoch {
 func (rt *Runtime) SetCaller(address addr.Address, actorType cid.Cid) {
 	rt.caller = address
 	rt.callerType = actorType
+	rt.actorCodeCIDs[address] = actorType
+}
+
+func (rt *Runtime) SetAddressActorType(address addr.Address, actorType cid.Cid) {
 	rt.actorCodeCIDs[address] = actorType
 }
 
@@ -669,6 +709,15 @@ func (rt *Runtime) ExpectSend(toAddr addr.Address, methodNum abi.MethodNum, para
 	})
 }
 
+func (rt *Runtime) ExpectVerifySignature(sig crypto.Signature, signer addr.Address, plaintext []byte, result error) {
+	rt.expectVerifySigs = append(rt.expectVerifySigs, &expectVerifySig{
+		sig:       sig,
+		signer:    signer,
+		plaintext: plaintext,
+		result:    result,
+	})
+}
+
 func (rt *Runtime) ExpectCreateActor(codeId cid.Cid, address addr.Address) {
 	rt.expectCreateActor = &expectCreateActor{
 		codeId:  codeId,
@@ -684,19 +733,16 @@ func (rt *Runtime) SetHasher(f func(data []byte) [32]byte) {
 	rt.hashfunc = f
 }
 
-func (rt *Runtime) ExpectVerifySignature(sig crypto.Signature, signer addr.Address, plaintext []byte, result error) {
-	rt.expectVerifySig = &expectVerifySig{
-		sig:       sig,
-		signer:    signer,
-		plaintext: plaintext,
-		result:    result,
-	}
-}
-
 func (rt *Runtime) ExpectVerifySeal(seal abi.SealVerifyInfo, result error) {
 	rt.expectVerifySeal = &expectVerifySeal{
 		seal:   seal,
 		result: result,
+	}
+}
+
+func (rt *Runtime) ExpectComputeUnsealedSectorCID(reg abi.RegisteredSealProof, pieces []abi.PieceInfo, cid cid.Cid, err error) {
+	rt.expectComputeUnsealedSectorCID = &expectComputeUnsealedSectorCID{
+		reg, pieces, cid, err,
 	}
 }
 
@@ -736,17 +782,22 @@ func (rt *Runtime) Verify() {
 	if len(rt.expectSends) > 0 {
 		rt.failTest("missing expected send %v", rt.expectSends)
 	}
+	if len(rt.expectVerifySigs) > 0 {
+		rt.failTest("missing expected verify signature %v", rt.expectVerifySigs)
+	}
 	if rt.expectCreateActor != nil {
 		rt.failTest("missing expected create actor with code %s, address %s",
 			rt.expectCreateActor.codeId, rt.expectCreateActor.address)
 	}
-	if rt.expectVerifySig != nil {
-		rt.failTest("missing expected verify signature with signer %s, sig %v, plaintext %v",
-			rt.expectVerifySig.signer, rt.expectVerifySig.sig, rt.expectVerifySig.plaintext)
-	}
+
 	if rt.expectVerifySeal != nil {
 		rt.failTest("missing expected verify seal with %v", rt.expectVerifySeal.seal)
 	}
+
+	if rt.expectComputeUnsealedSectorCID != nil {
+		rt.failTest("missing expected ComputeUnsealedSectorCID with %v", rt.expectComputeUnsealedSectorCID)
+	}
+
 	if rt.expectVerifyConsensusFault != nil {
 		rt.failTest("missing expected verify consensus fault")
 	}
@@ -765,12 +816,18 @@ func (rt *Runtime) Reset() {
 	rt.expectRandomness = nil
 	rt.expectSends = nil
 	rt.expectCreateActor = nil
-	rt.expectVerifySig = nil
+	rt.expectVerifySigs = nil
 	rt.expectVerifySeal = nil
+	rt.expectComputeUnsealedSectorCID = nil
 }
 
 // Calls f() expecting it to invoke Runtime.Abortf() with a specified exit code.
 func (rt *Runtime) ExpectAbort(expected exitcode.ExitCode, f func()) {
+	rt.ExpectAbortConstainsMessage(expected, "", f)
+}
+
+// Calls f() expecting it to invoke Runtime.Abortf() with a specified exit code and message.
+func (rt *Runtime) ExpectAbortConstainsMessage(expected exitcode.ExitCode, substr string, f func()) {
 	rt.t.Helper()
 	prevState := rt.state
 
@@ -787,6 +844,11 @@ func (rt *Runtime) ExpectAbort(expected exitcode.ExitCode, f func()) {
 		}
 		if a.code != expected {
 			rt.failTest("abort expected code %v, got %v %s", expected, a.code, a.msg)
+		}
+		if substr != "" {
+			if !strings.Contains(a.msg, substr) {
+				rt.failTest("abort expected message\n'%s'\nto contain\n'%s'\n", a.msg, substr)
+			}
 		}
 		// Roll back state change.
 		rt.state = prevState
@@ -820,6 +882,21 @@ func (rt *Runtime) ExpectAssertionFailure(expected string, f func()) {
 		rt.state = prevState
 	}()
 	f()
+}
+
+func (rt *Runtime) ExpectLogsContain(substr string) {
+	for _, msg := range rt.logs {
+		if strings.Contains(msg, substr) {
+			return
+		}
+	}
+	rt.failTest("logs contain %d message(s) and do not contain \"%s\"", len(rt.logs), substr)
+}
+
+func (rt *Runtime) ExpectGasCharged(gas int64) {
+	if gas != rt.gasCharged {
+		rt.failTest("expected gas charged: %d, actual gas charged: %d", gas, rt.gasCharged)
+	}
 }
 
 func (rt *Runtime) Call(method interface{}, params interface{}) interface{} {
@@ -879,7 +956,9 @@ func (rt *Runtime) failTestNow(msg string, args ...interface{}) {
 	rt.t.FailNow()
 }
 
-func (rt *Runtime) ChargeGas(_ string, _, _ int64) {}
+func (rt *Runtime) ChargeGas(_ string, gas, _ int64) {
+	rt.gasCharged += gas
+}
 
 type ReturnWrapper struct {
 	V runtime.CBORMarshaler

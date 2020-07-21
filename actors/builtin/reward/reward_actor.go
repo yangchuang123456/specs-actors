@@ -20,19 +20,21 @@ func (a Actor) Exports() []interface{} {
 	return []interface{}{
 		builtin.MethodConstructor: a.Constructor,
 		2:                         a.AwardBlockReward,
-		3:                         a.LastPerEpochReward,
+		3:                         a.ThisEpochReward,
 		4:                         a.UpdateNetworkKPI,
 	}
 }
 
 var _ abi.Invokee = Actor{}
 
-func (a Actor) Constructor(rt vmr.Runtime, _ *adt.EmptyValue) *adt.EmptyValue {
+func (a Actor) Constructor(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	rt.ValidateImmediateCallerIs(builtin.SystemActorAddr)
-	// TODO: the initial epoch reward should be set here based on the genesis storage power KPI.
-	// https://github.com/filecoin-project/specs-actors/issues/317
 	actorlog.L.Info("call reward actor constructor")
-	st := ConstructState()
+	if currRealizedPower == nil {
+		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
+		return nil // linter does not understand abort exiting
+	}
+	st := ConstructState(*currRealizedPower)
 	rt.State().Create(st)
 	return nil
 }
@@ -70,9 +72,16 @@ func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) 
 	penalty := abi.NewTokenAmount(0)
 	var st State
 	rt.State().Readonly(&st)
-	blockReward := big.Div(st.LastPerEpochReward, big.NewInt(builtin.ExpectedLeadersPerEpoch))
-	blockReward = big.Mul(blockReward, big.NewInt(params.WinCount))
+
+	blockReward := big.Mul(st.ThisEpochReward, big.NewInt(params.WinCount))
+	blockReward = big.Div(blockReward, big.NewInt(builtin.ExpectedLeadersPerEpoch))
+
 	totalReward := big.Add(blockReward, params.GasReward)
+
+	if totalReward.GreaterThan(rt.CurrentBalance()) {
+		rt.Log(vmr.WARN, "reward actor balance %d below totalReward expected %d, paying out rest of balance", rt.CurrentBalance(), totalReward)
+		totalReward = rt.CurrentBalance()
+	}
 
 	// Cap the penalty at the total reward value.
 	penalty = big.Min(params.Penalty, totalReward)
@@ -87,82 +96,53 @@ func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) 
 	builtin.RequireSuccess(rt, code, "failed to send reward to miner: %s", minerAddr)
 
 	// Burn the penalty amount.
-	_, code = rt.Send(builtin.BurntFundsActorAddr, builtin.MethodSend, nil, penalty)
-	builtin.RequireSuccess(rt, code, "failed to send penalty to burnt funds actor")
+	if penalty.GreaterThan(abi.NewTokenAmount(0)) {
+		_, code = rt.Send(builtin.BurntFundsActorAddr, builtin.MethodSend, nil, penalty)
+		builtin.RequireSuccess(rt, code, "failed to send penalty to burnt funds actor")
+	}
 
 	return nil
 }
 
-func (a Actor) LastPerEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *abi.TokenAmount {
+type ThisEpochRewardReturn struct {
+	ThisEpochReward        abi.TokenAmount
+	ThisEpochBaselinePower abi.StoragePower
+}
+
+// The award value used for the current epoch, updated at the end of an epoch
+// through cron tick.  In the case previous epochs were null blocks this
+// is the reward value as calculated at the last non-null epoch.
+func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *ThisEpochRewardReturn {
 	rt.ValidateImmediateCallerAcceptAny()
 
 	var st State
 	rt.State().Readonly(&st)
-	return &st.LastPerEpochReward
-}
-
-// Updates the simple/baseline supply state and last epoch reward with computation for for a single epoch.
-func (a Actor) computePerEpochReward(st *State, clockTime abi.ChainEpoch, networkTime NetworkTime) abi.TokenAmount {
-	// TODO: PARAM_FINISH
-	newSimpleSupply := mintingFunction(SimpleTotal, big.Lsh(big.NewInt(int64(clockTime)), MintingInputFixedPoint))
-	newBaselineSupply := mintingFunction(BaselineTotal, networkTime)
-
-	newSimpleMinted := big.Max(big.Sub(newSimpleSupply, st.SimpleSupply), big.Zero())
-	newBaselineMinted := big.Max(big.Sub(newBaselineSupply, st.BaselineSupply), big.Zero())
-
-	// TODO: this isn't actually counting emitted reward, but expected reward (which will generally over-estimate).
-	// It's difficult to extract this from the minting function in its current form.
-	// https://github.com/filecoin-project/specs-actors/issues/317
-	st.SimpleSupply = newSimpleSupply
-	st.BaselineSupply = newBaselineSupply
-
-	perEpochReward := big.Add(newSimpleMinted, newBaselineMinted)
-	st.LastPerEpochReward = perEpochReward
-
-	return perEpochReward
-}
-
-const baselinePower = 1 << 50 // 1PiB for testnet, PARAM_FINISH
-func (a Actor) newBaselinePower(st *State, rewardEpochsPaid abi.ChainEpoch) abi.StoragePower {
-	// TODO: this is not the final baseline function or value, PARAM_FINISH
-	return big.NewInt(baselinePower)
-}
-
-func (a Actor) getEffectiveNetworkTime(st *State, cumsumBaseline abi.Spacetime, cumsumRealized abi.Spacetime) NetworkTime {
-	// TODO: this function depends on the final baseline
-	// EffectiveNetworkTime is a fractional input with an implicit denominator of (2^MintingInputFixedPoint).
-	// realizedCumsum is thus left shifted by MintingInputFixedPoint before converted into a FixedPoint fraction
-	// through division (which is an inverse function for the integral of the baseline).
-	return big.Div(big.Lsh(cumsumRealized, MintingInputFixedPoint), big.NewInt(baselinePower))
+	return &ThisEpochRewardReturn{
+		ThisEpochReward:        st.ThisEpochReward,
+		ThisEpochBaselinePower: st.ThisEpochBaselinePower,
+	}
 }
 
 // Called at the end of each epoch by the power actor (in turn by its cron hook).
-// This is only invoked for non-empty tipsets. The impact of this is that block rewards are paid out over
-// a schedule defined by non-empty tipsets, not by elapsed time/epochs.
-// This is not necessarily what we want, and may change.
+// This is only invoked for non-empty tipsets, but catches up any number of null
+// epochs to compute the next epoch reward.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
-	actorlog.L.Info("reward actor call update network kpi")
+	if currRealizedPower == nil {
+		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
+	}
+
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
-		actorlog.L.Info("the reward actor state before update is:",zap.Any("state",st))
-		// By the time this is called, the rewards for this epoch have been paid to miners.
-		st.RewardEpochsPaid++
-		st.RealizedPower = *currRealizedPower
+		// if there were null runs catch up the computation until
+		// st.Epoch == rt.CurrEpoch()
+		for st.Epoch < rt.CurrEpoch() {
+			// Update to next epoch to process null rounds
+			st.updateToNextEpoch(*currRealizedPower)
+		}
 
-		st.BaselinePower = a.newBaselinePower(&st, st.RewardEpochsPaid)
-		st.CumsumBaseline = big.Add(st.CumsumBaseline, st.BaselinePower)
-
-		// Cap realized power in computing CumsumRealized so that progress is only relative to the current epoch.
-		cappedRealizedPower := big.Min(st.BaselinePower, st.RealizedPower)
-		st.CumsumRealized = big.Add(st.CumsumRealized, cappedRealizedPower)
-
-		st.EffectiveNetworkTime = a.getEffectiveNetworkTime(&st, st.CumsumBaseline, st.CumsumRealized)
-		a.computePerEpochReward(&st, st.RewardEpochsPaid, st.EffectiveNetworkTime)
-
-		actorlog.L.Info("the reward actor state after update is:",zap.Any("state",st))
+		st.updateToNextEpochWithReward(*currRealizedPower)
 		return nil
 	})
-	actorlog.L.Info("")
 	return nil
 }

@@ -15,7 +15,7 @@ import (
 const WPoStProvingPeriod = abi.ChainEpoch(builtin.EpochsInDay) // 24 hours
 
 // The duration of a deadline's challenge window, the period before a deadline when the challenge is available.
-const WPoStChallengeWindow = abi.ChainEpoch(40 * 60 / builtin.EpochDurationSeconds) // 40 minutes (36 per day)
+const WPoStChallengeWindow = abi.ChainEpoch(30 * 60 / builtin.EpochDurationSeconds) // 30 minutes (48 per day)
 
 // The number of non-overlapping PoSt deadlines in each proving period.
 const WPoStPeriodDeadlines = uint64(WPoStProvingPeriod / WPoStChallengeWindow)
@@ -36,15 +36,19 @@ func init() {
 // https://github.com/filecoin-project/specs-actors/issues/470
 const SectorsMax = 32 << 20 // PARAM_FINISH
 
-// The maximum number of proving partitions a miner can have simultaneously active.
-func activePartitionsMax(partitionSectorCount uint64) uint64 {
-	return (SectorsMax / partitionSectorCount) + WPoStPeriodDeadlines
-}
+// The maximum number of partitions that may be required to be loaded in a single invocation.
+// This limits the number of simultaneous fault, recovery, or sector-extension declarations.
+// With 48 deadlines (half-hour), 200 partitions per declaration permits loading a full EiB of 32GiB
+// sectors with 1 message per epoch within a single half-hour deadline. A miner can of course submit more messages.
+const AddressedPartitionsMax = 200
 
-// The maximum number of partitions that may be submitted in a single message.
-// This bounds the size of a list/set of sector numbers that might be instantiated to process a submission.
-func windowPoStMessagePartitionsMax(partitionSectorCount uint64) uint64 {
-	return 100_000 / partitionSectorCount
+// The maximum number of sector infos that may be required to be loaded in a single invocation.
+const AddressedSectorsMax = 10_000
+
+// The maximum number of partitions that may be required to be loaded in a single invocation,
+// when all the sector infos for the partitions will be loaded.
+func loadPartitionsSectorsMax(partitionSectorCount uint64) uint64 {
+	return min64(AddressedSectorsMax/partitionSectorCount, AddressedPartitionsMax)
 }
 
 // The maximum number of new sectors that may be staged by a miner during a single proving period.
@@ -71,7 +75,7 @@ var MaxSealDuration = map[abi.RegisteredSealProof]abi.ChainEpoch{
 
 // Number of epochs between publishing the precommit and when the challenge for interactive PoRep is drawn
 // used to ensure it is not predictable by miner.
-const PreCommitChallengeDelay = abi.ChainEpoch(10)
+const PreCommitChallengeDelay = abi.ChainEpoch(150)
 
 // Lookback from the current epoch for state view for leader elections.
 const ElectionLookback = abi.ChainEpoch(1) // PARAM_FINISH
@@ -85,10 +89,10 @@ const WPoStChallengeLookback = abi.ChainEpoch(20)
 // Minimum period before a deadline's challenge window opens that a fault must be declared for that deadline.
 // This lookback must not be less than WPoStChallengeLookback lest a malicious miner be able to selectively declare
 // faults after learning the challenge value.
-const FaultDeclarationCutoff = WPoStChallengeLookback + 10
+const FaultDeclarationCutoff = WPoStChallengeLookback + 50
 
 // The maximum age of a fault before the sector is terminated.
-const FaultMaxAge = WPoStProvingPeriod*14 - 1
+const FaultMaxAge = WPoStProvingPeriod*14
 
 // Staging period for a miner worker key change.
 // Finality is a harsh delay for a miner who has lost their worker key, as the miner will miss Window PoSts until
@@ -100,6 +104,11 @@ const WorkerKeyChangeDelay = ChainFinality
 // The actual maximum extension will be the minimum of CurrEpoch + MaximumSectorExpirationExtension
 // and sector.ActivationEpoch+sealProof.SectorMaximumLifetime()
 const MaxSectorExpirationExtension = builtin.EpochsInYear
+
+// Ratio of sector size to maximum deals per sector.
+// The maximum number of deals is the sector size divided by this number (2^27)
+// which limits 32GiB sectors to 256 deals and 64GiB sectors to 512
+const DealLimitDenominator = 134217728
 
 var QualityBaseMultiplier = big.NewInt(10)         // PARAM_FINISH
 var DealWeightMultiplier = big.NewInt(11)          // PARAM_FINISH
@@ -140,8 +149,13 @@ func QAPowerForSector(size abi.SectorSize, sector *SectorOnChainInfo) abi.Storag
 }
 
 // Deposit per sector required at pre-commitment, refunded after the commitment is proven (else burned).
-func precommitDeposit(qaSectorPower abi.StoragePower, networkQAPower abi.StoragePower, networkTotalPledge, epochTargetReward, circulatingSupply abi.TokenAmount) abi.TokenAmount {
-	return InitialPledgeForPower(qaSectorPower, networkQAPower, networkTotalPledge, epochTargetReward, circulatingSupply)
+func precommitDeposit(qaSectorPower abi.StoragePower, networkQAPower abi.StoragePower, baselinePower abi.StoragePower, networkTotalPledge, epochTargetReward, circulatingSupply abi.TokenAmount) abi.TokenAmount {
+	return InitialPledgeForPower(qaSectorPower, networkQAPower, baselinePower, networkTotalPledge, epochTargetReward, circulatingSupply)
+}
+
+// Determine maximum number of deal miner's sector can hold
+func dealPerSectorLimit(size abi.SectorSize) uint64 {
+	return max64(256, uint64(size/DealLimitDenominator))
 }
 
 type BigFrac struct {

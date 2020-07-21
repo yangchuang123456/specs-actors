@@ -23,6 +23,10 @@ type Runtime = vmr.Runtime
 type SectorTermination int64
 
 const (
+	ErrTooManyProveCommits = exitcode.FirstActorSpecificExitCode + iota
+)
+
+const (
 	SectorTerminationExpired SectorTermination = iota // Implicit termination after all deals expire
 	SectorTerminationManual                           // Unscheduled explicit termination by the miner
 	SectorTerminationFaulty                           // Implicit termination due to unrecovered fault
@@ -154,7 +158,6 @@ type UpdateClaimedPowerParams struct {
 func (a Actor) UpdateClaimedPower(rt Runtime, params *UpdateClaimedPowerParams) *adt.EmptyValue {
 	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
 	minerAddr := rt.Message().Caller()
-
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		err := st.AddToClaim(adt.AsStore(rt), minerAddr, params.RawByteDelta, params.QualityAdjustedDelta)
@@ -175,6 +178,11 @@ func (a Actor) EnrollCronEvent(rt Runtime, params *EnrollCronEventParams) *adt.E
 	minerEvent := CronEvent{
 		MinerAddr:       minerAddr,
 		CallbackPayload: params.Payload,
+	}
+
+	// Ensure it is not possible to enter a large negative number which would cause problems in cron processing.
+	if params.EventEpoch < 0 {
+		rt.Abortf(exitcode.ErrIllegalArgument, "cron event epoch %d cannot be less than zero", params.EventEpoch)
 	}
 
 	var st State
@@ -203,11 +211,22 @@ func (a Actor) OnEpochTickEnd(rt Runtime, _ *adt.EmptyValue) *adt.EmptyValue {
 	var st State
 	rt.State().Readonly(&st)
 
+	// update next epoch's power and pledge values
+	// this must come before the next epoch's rewards are calculated
+	// so that next epoch reward reflects power added this epoch
+	rt.State().Transaction(&st, func() interface{} {
+		rawBytePower, qaPower := CurrentTotalPower(&st)
+		st.ThisEpochPledgeCollateral = st.TotalPledgeCollateral
+		st.ThisEpochQualityAdjPower = qaPower
+		st.ThisEpochRawBytePower = rawBytePower
+		return nil
+	})
+
 	// update network KPI in RewardActor
 	_, code := rt.Send(
 		builtin.RewardActorAddr,
 		builtin.MethodsReward.UpdateNetworkKPI,
-		&st.TotalRawBytePower,
+		&st.ThisEpochRawBytePower,
 		abi.NewTokenAmount(0),
 	)
 	builtin.RequireSuccess(rt, code, "failed to update network KPI with Reward Actor")
@@ -240,9 +259,8 @@ func (a Actor) OnConsensusFault(rt Runtime, pledgeAmount *abi.TokenAmount) *adt.
 		}
 		Assert(claim.RawBytePower.GreaterThanEqual(big.Zero()))
 		Assert(claim.QualityAdjPower.GreaterThanEqual(big.Zero()))
-
-		st.TotalQualityAdjPower = big.Sub(st.TotalQualityAdjPower, claim.QualityAdjPower)
-		st.TotalRawBytePower = big.Sub(st.TotalRawBytePower, claim.RawBytePower)
+		err = st.AddToClaim(adt.AsStore(rt), minerAddr, claim.QualityAdjPower.Neg(), claim.RawBytePower.Neg())
+		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "could not add to claim for %s after loading existing claim for this address", minerAddr)
 
 		st.addPledgeTotal(pledgeAmount.Neg())
 		return nil
@@ -254,13 +272,15 @@ func (a Actor) OnConsensusFault(rt Runtime, pledgeAmount *abi.TokenAmount) *adt.
 	return nil
 }
 
+// GasOnSubmitVerifySeal is amount of gas charged for SubmitPoRepForBulkVerify
+// This number is empirically determined
+const GasOnSubmitVerifySeal = 132166313
+
 func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo) *adt.EmptyValue {
 	rt.ValidateImmediateCallerType(builtin.StorageMinerActorCodeID)
 
 	minerAddr := rt.Message().Caller()
 
-	// TODO: charge a LOT of gas
-	// https://github.com/filecoin-project/specs-actors/issues/442
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		store := adt.AsStore(rt)
@@ -275,6 +295,12 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 			}
 		}
 
+		arr, found, err := mmap.Get(adt.AddrKey(minerAddr))
+		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalState, "failed to get get seal verify infos at addr %s", minerAddr)
+		if found && arr.Length() >= MaxMinerProveCommitsPerEpoch {
+			rt.Abortf(ErrTooManyProveCommits, "miner %s attempting to prove commit over %d sectors in epoch", minerAddr, MaxMinerProveCommitsPerEpoch)
+		}
+
 		if err := mmap.Add(adt.AddrKey(minerAddr), sealInfo); err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to insert proof into set: %s", err)
 		}
@@ -283,6 +309,7 @@ func (a Actor) SubmitPoRepForBulkVerify(rt Runtime, sealInfo *abi.SealVerifyInfo
 		if err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to flush proofs batch map: %s", err)
 		}
+		rt.ChargeGas("OnSubmitVerifySeal", GasOnSubmitVerifySeal, 0)
 		st.ProofValidationBatch = &mmrc
 		return nil
 	})
@@ -297,15 +324,18 @@ type CurrentTotalPowerReturn struct {
 }
 
 // Returns the total power and pledge recorded by the power actor.
-// TODO hold these values constant during an epoch for stable calculations, https://github.com/filecoin-project/specs-actors/issues/495
+// The returned values are frozen during the cron tick before this epoch
+// so that this method returns consistent values while processing all messages
+// of an epoch.
 func (a Actor) CurrentTotalPower(rt Runtime, _ *adt.EmptyValue) *CurrentTotalPowerReturn {
 	rt.ValidateImmediateCallerAcceptAny()
 	var st State
 	rt.State().Readonly(&st)
+
 	return &CurrentTotalPowerReturn{
-		RawBytePower:     st.TotalRawBytePower,
-		QualityAdjPower:  st.TotalQualityAdjPower,
-		PledgeCollateral: st.TotalPledgeCollateral,
+		RawBytePower:     st.ThisEpochRawBytePower,
+		QualityAdjPower:  st.ThisEpochQualityAdjPower,
+		PledgeCollateral: st.ThisEpochPledgeCollateral,
 	}
 }
 
@@ -407,7 +437,7 @@ func (a Actor) processDeferredCronEvents(rt Runtime) error {
 	rt.State().Transaction(&st, func() interface{} {
 		store := adt.AsStore(rt)
 
-		for epoch := st.LastEpochTick + 1; epoch <= rtEpoch; epoch++ {
+		for epoch := st.FirstCronEpoch; epoch <= rtEpoch; epoch++ {
 			epochEvents, err := st.loadCronEvents(store, epoch)
 			if err != nil {
 				return errors.Wrapf(err, "failed to load cron events at %v", epoch)
@@ -423,33 +453,64 @@ func (a Actor) processDeferredCronEvents(rt Runtime) error {
 			}
 		}
 
-		st.LastEpochTick = rtEpoch
+		st.FirstCronEpoch = rtEpoch + 1
 		return nil
 	})
-
+	failedMinerCrons := make([]addr.Address, 0)
 	for _, event := range cronEvents {
-		_, _ = rt.Send(
+		_, code := rt.Send(
 			event.MinerAddr,
 			builtin.MethodsMiner.OnDeferredCronEvent,
 			vmr.CBORBytes(event.CallbackPayload),
 			abi.NewTokenAmount(0),
 		)
-		// The exit code is ignored. If a callback fails, this actor continues to invoke other callbacks
+		// If a callback fails, this actor continues to invoke other callbacks
 		// and persists state removing the failed event from the event queue. It won't be tried again.
-		// A log message would really help here, though.
+		// Failures are unexpected here but will result in removal of miner power
+		// A log message would really help here.
+		if code != exitcode.Ok {
+			rt.Log(vmr.WARN, "OnDeferredCronEvent failed for miner %s: exitcode %d", event.MinerAddr, code)
+			failedMinerCrons = append(failedMinerCrons, event.MinerAddr)
+		}
 	}
+	rt.State().Transaction(&st, func() interface{} {
+		store := adt.AsStore(rt)
+		// Remove power and leave miner frozen
+		for _, minerAddr := range failedMinerCrons {
+			claim, found, err := st.GetClaim(store, minerAddr)
+			if err != nil {
+				rt.Log(vmr.ERROR, "failed to get claim for miner %s after failing OnDeferredCronEvent: %s", minerAddr, err)
+				continue
+			}
+			if !found {
+				rt.Log(vmr.WARN, "miner OnDeferredCronEvent failed for miner %s with no power", minerAddr)
+				continue
+			}
+
+			// zero out miner power
+			err = st.AddToClaim(store, minerAddr, claim.RawBytePower.Neg(), claim.QualityAdjPower.Neg())
+			if err != nil {
+				rt.Log(vmr.WARN, "failed to remove (%d, %d) power for miner %s after to failed cron", claim.RawBytePower, claim.QualityAdjPower, minerAddr)
+				continue
+			}
+		}
+		return nil
+	})
 	return nil
 }
 
 func (a Actor) deleteMinerActor(rt Runtime, miner addr.Address) error {
 	var st State
-	err := rt.State().Transaction(&st, func() interface{} {
-		if err := st.deleteClaim(adt.AsStore(rt), miner); err != nil {
-			return errors.Wrapf(err, "failed to delete %v from claimed power table", miner)
+	var err error
+	rt.State().Transaction(&st, func() interface{} {
+		err = st.deleteClaim(adt.AsStore(rt), miner)
+		if err != nil {
+			err = errors.Wrapf(err, "failed to delete %v from claimed power table", miner)
+			return nil
 		}
 
 		st.MinerCount -= 1
 		return nil
-	}).(error)
+	})
 	return err
 }

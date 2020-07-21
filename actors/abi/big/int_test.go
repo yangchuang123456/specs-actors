@@ -109,6 +109,47 @@ func TestOperations(t *testing.T) {
 	assert.True(t, ta.Nil())
 }
 
+func TestCopy(t *testing.T) {
+	b1 := NewInt(1)
+	b2 := b1.Copy()
+	require.EqualValues(t, b1, b2)
+
+	require.EqualValues(t, Zero(), Zero().Copy())
+}
+
+func TestSum(t *testing.T) {
+	b1 := NewInt(1)
+	b2 := NewInt(2)
+	b3 := NewInt(3)
+	b4 := NewInt(4)
+
+	require.EqualValues(t, NewInt(10), Sum(b1, b2, b3, b4))
+
+	require.EqualValues(t, NewInt(20), Sum(NewInt(20)))
+}
+
+func TestProduct(t *testing.T) {
+	b1 := NewInt(1)
+	b2 := NewInt(2)
+	b3 := NewInt(3)
+	b4 := NewInt(4)
+
+	require.EqualValues(t, NewInt(24), Product(b1, b2, b3, b4))
+
+	require.EqualValues(t, NewInt(20), Product(NewInt(20)))
+}
+
+func TestSubtract(t *testing.T) {
+	b1 := NewInt(100)
+	b2 := NewInt(20)
+	b3 := NewInt(10)
+	b4 := NewInt(5)
+
+	require.EqualValues(t, NewInt(65), Subtract(b1, b2, b3, b4))
+
+	require.EqualValues(t, NewInt(20), Subtract(NewInt(20)))
+}
+
 func TestInt_Format(t *testing.T) {
 	ta := NewInt(33333000000)
 
