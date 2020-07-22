@@ -45,6 +45,9 @@ type Deadline struct {
 
 	// The number of non-terminated sectors in this deadline (incl faulty).
 	LiveSectors uint64
+
+	// The total number of sectors in this deadline (incl dead).
+	TotalSectors uint64
 }
 
 //
@@ -240,11 +243,11 @@ func (dl *Deadline) AddSectors(store adt.Store, partitionSize uint64, sectors []
 		return NewPowerPairZero(), nil
 	}
 
+	// First update partitions, consuming the sectors
 	partitionDeadlineUpdates := make(map[abi.ChainEpoch][]uint64)
-
-	// First update partitions
-
 	newPower := NewPowerPairZero()
+	dl.LiveSectors += uint64(len(sectors))
+	dl.TotalSectors += uint64(len(sectors))
 
 	{
 		partitions, err := dl.PartitionsArray(store)
@@ -263,18 +266,17 @@ func (dl *Deadline) AddSectors(store adt.Store, partitionSize uint64, sectors []
 			if found, err := partitions.Get(partIdx, partition); err != nil {
 				return NewPowerPairZero(), err
 			} else if !found {
-				// Calling this once per loop is fine. We're almost
-				// never going to add more than one partition per call.
+				// This case will usually happen zero times.
+				// It would require adding more than a full partition in one go
+				// to happen more than once.
 				emptyArray, err := adt.MakeEmptyArray(store).Root()
 				if err != nil {
 					return NewPowerPairZero(), err
 				}
-
 				partition = ConstructPartition(emptyArray)
 			}
 
-			// Figure out which (if any) sectors we want to add to
-			// this partition.
+			// Figure out which (if any) sectors we want to add to this partition.
 			sectorCount, err := partition.Sectors.Count()
 			if err != nil {
 				return NewPowerPairZero(), err
@@ -318,8 +320,7 @@ func (dl *Deadline) AddSectors(store adt.Store, partitionSize uint64, sectors []
 		}
 	}
 
-	// Next, update the per-deadline expiration queues.
-
+	// Next, update the expiration queue.
 	{
 		deadlineExpirations, err := LoadBitfieldQueue(store, dl.ExpirationsEpochs, quant)
 		if err != nil {
@@ -334,8 +335,6 @@ func (dl *Deadline) AddSectors(store adt.Store, partitionSize uint64, sectors []
 			return NewPowerPairZero(), err
 		}
 	}
-
-	dl.LiveSectors += uint64(len(sectors))
 
 	return newPower, nil
 }

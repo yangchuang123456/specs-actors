@@ -187,6 +187,8 @@ type ChangePeerIDParams struct {
 }
 
 func (a Actor) ChangePeerID(rt Runtime, params *ChangePeerIDParams) *adt.EmptyValue {
+	// TODO: Consider limiting the maximum number of bytes used by the peer ID on-chain.
+	// https://github.com/filecoin-project/specs-actors/issues/712
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		info := getMinerInfo(rt, &st)
@@ -205,6 +207,8 @@ type ChangeMultiaddrsParams struct {
 }
 
 func (a Actor) ChangeMultiaddrs(rt Runtime, params *ChangeMultiaddrsParams) *adt.EmptyValue {
+	// TODO: Consider limiting the maximum number of bytes used by multiaddrs on-chain.
+	// https://github.com/filecoin-project/specs-actors/issues/712
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		info := getMinerInfo(rt, &st)
@@ -416,12 +420,22 @@ func (a Actor) SubmitWindowedPoSt(rt Runtime, params *SubmitWindowedPoStParams) 
 // Proposals must be posted on chain via sma.PublishStorageDeals before PreCommitSector.
 // Optimization: PreCommitSector could contain a list of deals that are not published yet.
 func (a Actor) PreCommitSector(rt Runtime, params *SectorPreCommitInfo) *adt.EmptyValue {
-	if params.Expiration <= rt.CurrEpoch() {
-		rt.Abortf(exitcode.ErrIllegalArgument, "sector expiration %v must be after now (%v)", params.Expiration, rt.CurrEpoch())
+	if _, ok := SupportedProofTypes[params.SealProof]; !ok {
+		rt.Abortf(exitcode.ErrIllegalArgument, "unsupported seal proof type: %s", params.SealProof)
+	}
+	if params.SectorNumber > abi.MaxSectorNumber {
+		rt.Abortf(exitcode.ErrIllegalArgument, "sector number %d out of range 0..(2^63-1)", params.SectorNumber)
+	}
+	if !params.SealedCID.Defined() {
+		rt.Abortf(exitcode.ErrIllegalArgument, "sealed CID undefined")
+	}
+	if params.SealedCID.Prefix() != SealedCIDPrefix {
+		rt.Abortf(exitcode.ErrIllegalArgument, "sealed CID had wrong prefix")
 	}
 	if params.SealRandEpoch >= rt.CurrEpoch() {
 		rt.Abortf(exitcode.ErrIllegalArgument, "seal challenge epoch %v must be before now %v", params.SealRandEpoch, rt.CurrEpoch())
 	}
+
 	challengeEarliest := sealChallengeEarliest(rt.CurrEpoch(), params.SealProof)
 	if params.SealRandEpoch < challengeEarliest {
 		// The subsequent commitment proof can't possibly be accepted because the seal challenge will be deemed
@@ -429,8 +443,18 @@ func (a Actor) PreCommitSector(rt Runtime, params *SectorPreCommitInfo) *adt.Emp
 		// when it arrives.
 		rt.Abortf(exitcode.ErrIllegalArgument, "seal challenge epoch %v too old, must be after %v", params.SealRandEpoch, challengeEarliest)
 	}
+
+	if params.Expiration <= rt.CurrEpoch() {
+		rt.Abortf(exitcode.ErrIllegalArgument, "sector expiration %v must be after now (%v)", params.Expiration, rt.CurrEpoch())
+	}
 	if params.ReplaceCapacity && len(params.DealIDs) == 0 {
 		rt.Abortf(exitcode.ErrIllegalArgument, "cannot replace sector without committing deals")
+	}
+	if params.ReplaceSectorDeadline >= WPoStPeriodDeadlines {
+		rt.Abortf(exitcode.ErrIllegalArgument, "invalid deadline %d", params.ReplaceSectorDeadline)
+	}
+	if params.ReplaceSectorNumber >= abi.MaxSectorNumber {
+		rt.Abortf(exitcode.ErrIllegalArgument, "invalid sector number %d", params.ReplaceSectorNumber)
 	}
 
 	// gather information from other actors
@@ -771,6 +795,9 @@ func (a Actor) ExtendSectorExpiration(rt Runtime, params *ExtendSectorExpiration
 	// https://github.com/filecoin-project/specs-actors/issues/416
 	var sectorCount uint64
 	for _, decl := range params.Extensions {
+		if decl.Deadline >= WPoStPeriodDeadlines {
+			rt.Abortf(exitcode.ErrIllegalArgument, "deadline %d not in range 0..%d", decl.Deadline, WPoStPeriodDeadlines)
+		}
 		count, err := decl.Sectors.Count()
 		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalArgument,
 			"failed to count sectors for deadline %d, partition %d",
@@ -801,7 +828,9 @@ func (a Actor) ExtendSectorExpiration(rt Runtime, params *ExtendSectorExpiration
 		declsByDeadline := map[uint64][]*ExpirationExtension{}
 		var deadlinesToLoad []uint64
 		for _, decl := range params.Extensions {
-			deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			if _, ok := declsByDeadline[decl.Deadline]; !ok {
+				deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			}
 			declsByDeadline[decl.Deadline] = append(declsByDeadline[decl.Deadline], &decl)
 		}
 
@@ -921,6 +950,9 @@ func (a Actor) TerminateSectors(rt Runtime, params *TerminateSectorsParams) *Ter
 	}
 	var sectorCount uint64
 	for _, term := range params.Terminations {
+		if term.Deadline >= WPoStPeriodDeadlines {
+			rt.Abortf(exitcode.ErrIllegalArgument, "deadline %d not in range 0..%d", term.Deadline, WPoStPeriodDeadlines)
+		}
 		count, err := term.Sectors.Count()
 		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalArgument,
 			"failed to count sectors for deadline %d, partition %d",
@@ -954,7 +986,9 @@ func (a Actor) TerminateSectors(rt Runtime, params *TerminateSectorsParams) *Ter
 		declsByDeadline := map[uint64][]*TerminationDeclaration{}
 		var deadlinesToLoad []uint64
 		for _, decl := range params.Terminations {
-			deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			if _, ok := declsByDeadline[decl.Deadline]; !ok {
+				deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			}
 			declsByDeadline[decl.Deadline] = append(declsByDeadline[decl.Deadline], &decl)
 		}
 
@@ -1051,6 +1085,9 @@ func (a Actor) DeclareFaults(rt Runtime, params *DeclareFaultsParams) *adt.Empty
 	}
 	var sectorCount uint64
 	for _, decl := range params.Faults {
+		if decl.Deadline >= WPoStPeriodDeadlines {
+			rt.Abortf(exitcode.ErrIllegalArgument, "deadline %d not in range 0..%d", decl.Deadline, WPoStPeriodDeadlines)
+		}
 		count, err := decl.Sectors.Count()
 		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalArgument,
 			"failed to count sectors for deadline %d, partition %d",
@@ -1080,7 +1117,9 @@ func (a Actor) DeclareFaults(rt Runtime, params *DeclareFaultsParams) *adt.Empty
 		declsByDeadline := map[uint64][]*FaultDeclaration{}
 		var deadlinesToLoad []uint64
 		for _, decl := range params.Faults {
-			deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			if _, ok := declsByDeadline[decl.Deadline]; !ok {
+				deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			}
 			declsByDeadline[decl.Deadline] = append(declsByDeadline[decl.Deadline], &decl)
 		}
 
@@ -1201,6 +1240,9 @@ func (a Actor) DeclareFaultsRecovered(rt Runtime, params *DeclareFaultsRecovered
 
 	var sectorCount uint64
 	for _, decl := range params.Recoveries {
+		if decl.Deadline >= WPoStPeriodDeadlines {
+			rt.Abortf(exitcode.ErrIllegalArgument, "deadline %d not in range 0..%d", decl.Deadline, WPoStPeriodDeadlines)
+		}
 		count, err := decl.Sectors.Count()
 		builtin.RequireNoErr(rt, err, exitcode.ErrIllegalArgument,
 			"failed to count sectors for deadline %d, partition %d",
@@ -1228,7 +1270,9 @@ func (a Actor) DeclareFaultsRecovered(rt Runtime, params *DeclareFaultsRecovered
 		declsByDeadline := map[uint64][]*RecoveryDeclaration{}
 		var deadlinesToLoad []uint64
 		for _, decl := range params.Recoveries {
-			deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			if _, ok := declsByDeadline[decl.Deadline]; !ok {
+				deadlinesToLoad = append(deadlinesToLoad, decl.Deadline)
+			}
 			declsByDeadline[decl.Deadline] = append(declsByDeadline[decl.Deadline], &decl)
 		}
 
@@ -1306,6 +1350,7 @@ func (a Actor) CompactPartitions(rt Runtime, params *CompactPartitionsParams) *a
 	if params.Deadline >= WPoStPeriodDeadlines {
 		rt.Abortf(exitcode.ErrIllegalArgument, "invalid deadline %v", params.Deadline)
 	}
+
 	var st State
 	rt.State().Transaction(&st, func() interface{} {
 		info := getMinerInfo(rt, &st)
@@ -1328,6 +1373,10 @@ func (a Actor) CompactPartitions(rt Runtime, params *CompactPartitionsParams) *a
 
 // Locks up some amount of a the miner's unlocked balance (including any received alongside the invoking message).
 func (a Actor) AddLockedFund(rt Runtime, amountToLock *abi.TokenAmount) *adt.EmptyValue {
+	if amountToLock.Sign() < 0 {
+		rt.Abortf(exitcode.ErrIllegalArgument, "cannot lock up a negative amount of funds")
+	}
+
 	store := adt.AsStore(rt)
 	var st State
 	newlyVested := rt.State().Transaction(&st, func() interface{} {
@@ -1342,7 +1391,7 @@ func (a Actor) AddLockedFund(rt Runtime, amountToLock *abi.TokenAmount) *adt.Emp
 			rt.Abortf(exitcode.ErrInsufficientFunds, "insufficient funds to lock, available: %v, requested: %v", availableBalance, *amountToLock)
 		}
 
-		if err := st.AddLockedFunds(store, rt.CurrEpoch(), *amountToLock, &PledgeVestingSpec); err != nil {
+		if err := st.AddLockedFunds(store, rt.CurrEpoch(), *amountToLock, &RewardVestingSpec); err != nil {
 			rt.Abortf(exitcode.ErrIllegalState, "failed to lock pledge: %v", err)
 		}
 		return newlyVestedFund

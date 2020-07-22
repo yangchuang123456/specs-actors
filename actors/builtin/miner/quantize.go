@@ -8,11 +8,15 @@ type QuantSpec struct {
 	offset abi.ChainEpoch // The offset from zero from which to base the modulus
 }
 
+func NewQuantSpec(unit, offset abi.ChainEpoch) QuantSpec {
+	return QuantSpec{unit: unit, offset: offset}
+}
+
 func (q QuantSpec) QuantizeUp(e abi.ChainEpoch) abi.ChainEpoch {
 	return quantizeUp(e, q.unit, q.offset)
 }
 
-var NoQuantization = QuantSpec{unit: 1, offset: 0}
+var NoQuantization = NewQuantSpec(1, 0)
 
 // Rounds e to the nearest exact multiple of the quantization unit offset by
 // offsetSeed % unit, rounding up.

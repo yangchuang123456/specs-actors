@@ -52,7 +52,7 @@ func ConstructState(currRealizedPower abi.StoragePower) *State {
 		EffectiveBaselinePower: BaselineInitialValue,
 
 		ThisEpochReward:        big.Zero(),
-		ThisEpochBaselinePower: BaselineInitialValue,
+		ThisEpochBaselinePower: InitBaselinePower(),
 		Epoch:                  -1,
 	}
 
@@ -69,8 +69,9 @@ func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
 	st.Print()
 	actorlog.L.Info("updateToNextEpoch execute is:111")
 	st.Epoch++
-	st.ThisEpochBaselinePower = BaselinePowerNextEpoch(st.ThisEpochBaselinePower)
+
 	actorlog.L.Info("updateToNextEpoch execute is:222")
+	st.ThisEpochBaselinePower = BaselinePowerFromPrev(st.ThisEpochBaselinePower)
 	cappedRealizedPower := big.Min(st.ThisEpochBaselinePower, currRealizedPower)
 	st.CumsumRealized = big.Add(st.CumsumRealized, cappedRealizedPower)
 	actorlog.L.Info("updateToNextEpoch execute is:333",zap.Any("st.EffectiveBaselinePower",st.EffectiveBaselinePower))
@@ -79,10 +80,9 @@ func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
 		actorlog.L.Info("st.CumsumRealized.GreaterThan(st.CumsumBaseline)",zap.Any("CumsumRealized", st.CumsumRealized), zap.Any("CumsumBaseline", st.CumsumBaseline),zap.Any("epoch",st.Epoch))
 		st.EffectiveNetworkTime++
 		actorlog.L.Info("st.CumsumRealized.GreaterThan(st.CumsumBaseline)",zap.Any("EffectiveNetworkTime", st.EffectiveNetworkTime),zap.Any("epoch",st.Epoch))
-		st.EffectiveBaselinePower = BaselinePowerNextEpoch(st.EffectiveBaselinePower)
-		actorlog.L.Info("st.EffectiveBaselinePower",zap.Any("st.EffectiveBaselinePower", st.EffectiveBaselinePower),zap.Any("epoch",st.Epoch))
-		st.CumsumBaseline = big.Add(st.CumsumBaseline, st.EffectiveBaselinePower)
+		st.EffectiveBaselinePower = BaselinePowerFromPrev(st.EffectiveBaselinePower)
 		actorlog.L.Info("st.CumsumBaseline",zap.Any("st.CumsumBaseline", st.CumsumBaseline),zap.Any("epoch",st.Epoch))
+		st.CumsumBaseline = big.Add(st.CumsumBaseline, st.EffectiveBaselinePower)
 	}
 	actorlog.L.Info("updateToNextEpoch end the state is:")
 	st.Print()
