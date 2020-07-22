@@ -145,3 +145,14 @@ func Test_reward(t *testing.T) {
 		log.Println("")
 	}
 }
+
+func Test_BaselinePowerNextEpoch(t *testing.T){
+	log.Println("the BaselineInitialValue is:",reward.BaselineInitialValue)
+	nextEpoch:=reward.BaselinePowerNextEpoch(reward.BaselineInitialValue)
+	log.Println("the nex epoch baseline power is:",nextEpoch)
+	log.Println("the base total supply is:",big.NewInt(900e6))
+
+	st := reward.State{}
+	st.Print()
+	//reward.BaselinePowerNextEpoch(abi.StoragePower{})
+}

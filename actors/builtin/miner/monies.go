@@ -39,6 +39,7 @@ func ExpectedDayRewardForPower(epochTargetReward abi.TokenAmount, networkQAPower
 // it has been previously detected by the network.
 // FF(t) = DeclaredFaultFactor * BR(t)
 func PledgePenaltyForDeclaredFault(epochReward abi.TokenAmount, networkQAPower abi.StoragePower, qaSectorPower abi.StoragePower) abi.TokenAmount {
+	return big.NewInt(0)
 	return big.Div(
 		big.Mul(DeclaredFaultFactorNum, ExpectedDayRewardForPower(epochReward, networkQAPower, qaSectorPower)),
 		DeclaredFaultFactorDenom)
@@ -47,6 +48,7 @@ func PledgePenaltyForDeclaredFault(epochReward abi.TokenAmount, networkQAPower a
 // This is the SP(t) penalty for a newly faulty sector that has not been declared.
 // SP(t) = UndeclaredFaultFactor * BR(t)
 func PledgePenaltyForUndeclaredFault(epochReward abi.TokenAmount, networkQAPower abi.StoragePower, qaSectorPower abi.StoragePower) abi.TokenAmount {
+	return big.NewInt(0)
 	return big.Div(
 		big.Mul(UndeclaredFaultFactorNum, ExpectedDayRewardForPower(epochReward, networkQAPower, qaSectorPower)),
 		UndeclaredFaultFactorDenom)
@@ -55,6 +57,7 @@ func PledgePenaltyForUndeclaredFault(epochReward abi.TokenAmount, networkQAPower
 // Penalty to locked pledge collateral for the termination of a sector before scheduled expiry.
 // SectorAge is the time between the sector's activation and termination.
 func PledgePenaltyForTermination(initialPledge abi.TokenAmount, sectorAge abi.ChainEpoch, epochTargetReward abi.TokenAmount, networkQAPower, qaSectorPower abi.StoragePower) abi.TokenAmount {
+	return big.NewInt(0)
 	// max(SP(t), IP + BR(StartEpoch)*min(SectorAgeInDays, 180))
 	// where BR(StartEpoch)=IP/InitialPledgeFactor
 	// and sectorAgeInDays = sectorAge / EpochsInDay
@@ -73,7 +76,7 @@ func PledgePenaltyForTermination(initialPledge abi.TokenAmount, sectorAge abi.Ch
 // In plain language, the pledge requirement is a multiple of the block reward expected to be earned by the
 // newly-committed power, holding the per-epoch block reward constant (though in reality it will change over time).
 func InitialPledgeForPower(qaPower abi.StoragePower, networkQAPower, baselinePower abi.StoragePower, networkTotalPledge abi.TokenAmount, epochTargetReward abi.TokenAmount, networkCirculatingSupply abi.TokenAmount) abi.TokenAmount {
-
+	return big.NewInt(0)
 	ipBase := big.Mul(InitialPledgeFactor, ExpectedDayRewardForPower(epochTargetReward, networkQAPower, qaPower))
 
 	lockTargetNum := big.Mul(LockTargetFactorNum, networkCirculatingSupply)

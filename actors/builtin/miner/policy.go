@@ -147,6 +147,7 @@ func QAPowerForSector(size abi.SectorSize, sector *SectorOnChainInfo) abi.Storag
 
 // Deposit per sector required at pre-commitment, refunded after the commitment is proven (else burned).
 func precommitDeposit(qaSectorPower abi.StoragePower, networkQAPower abi.StoragePower, baselinePower abi.StoragePower, networkTotalPledge, epochTargetReward, circulatingSupply abi.TokenAmount) abi.TokenAmount {
+	return big.NewInt(0)
 	return InitialPledgeForPower(qaSectorPower, networkQAPower, baselinePower, networkTotalPledge, epochTargetReward, circulatingSupply)
 }
 

@@ -3,8 +3,10 @@ package reward
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
 	"go.uber.org/zap"
 	"log"
 )
@@ -42,6 +44,7 @@ type State struct {
 }
 
 func ConstructState(currRealizedPower abi.StoragePower) *State {
+	actorlog.L.Info("call reward state ConstructState")
 	st := &State{
 		CumsumBaseline:         big.Zero(),
 		CumsumRealized:         big.Zero(),
@@ -54,6 +57,7 @@ func ConstructState(currRealizedPower abi.StoragePower) *State {
 	}
 
 	st.updateToNextEpochWithReward(currRealizedPower)
+	st.Print()
 
 	return st
 }
@@ -61,16 +65,27 @@ func ConstructState(currRealizedPower abi.StoragePower) *State {
 // Takes in current realized power and updates internal state
 // Used for update of internal state during null rounds
 func (st *State) updateToNextEpoch(currRealizedPower abi.StoragePower) {
+	actorlog.L.Info("updateToNextEpoch start the state is:",zap.Any("stAddr",fmt.Sprintf("%p",st)))
+	st.Print()
+	actorlog.L.Info("updateToNextEpoch execute is:111")
 	st.Epoch++
 	st.ThisEpochBaselinePower = BaselinePowerNextEpoch(st.ThisEpochBaselinePower)
+	actorlog.L.Info("updateToNextEpoch execute is:222")
 	cappedRealizedPower := big.Min(st.ThisEpochBaselinePower, currRealizedPower)
 	st.CumsumRealized = big.Add(st.CumsumRealized, cappedRealizedPower)
-
+	actorlog.L.Info("updateToNextEpoch execute is:333",zap.Any("st.EffectiveBaselinePower",st.EffectiveBaselinePower))
+	st.Print()
 	for st.CumsumRealized.GreaterThan(st.CumsumBaseline) {
+		actorlog.L.Info("st.CumsumRealized.GreaterThan(st.CumsumBaseline)",zap.Any("CumsumRealized", st.CumsumRealized), zap.Any("CumsumBaseline", st.CumsumBaseline),zap.Any("epoch",st.Epoch))
 		st.EffectiveNetworkTime++
+		actorlog.L.Info("st.CumsumRealized.GreaterThan(st.CumsumBaseline)",zap.Any("EffectiveNetworkTime", st.EffectiveNetworkTime),zap.Any("epoch",st.Epoch))
 		st.EffectiveBaselinePower = BaselinePowerNextEpoch(st.EffectiveBaselinePower)
+		actorlog.L.Info("st.EffectiveBaselinePower",zap.Any("st.EffectiveBaselinePower", st.EffectiveBaselinePower),zap.Any("epoch",st.Epoch))
 		st.CumsumBaseline = big.Add(st.CumsumBaseline, st.EffectiveBaselinePower)
+		actorlog.L.Info("st.CumsumBaseline",zap.Any("st.CumsumBaseline", st.CumsumBaseline),zap.Any("epoch",st.Epoch))
 	}
+	actorlog.L.Info("updateToNextEpoch end the state is:")
+	st.Print()
 }
 
 // Takes in a current realized power for a reward epoch and computes
@@ -81,18 +96,16 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 	currRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.EffectiveBaselinePower, st.CumsumRealized, st.CumsumBaseline)
 
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
-
 }
 
 func (st *State) Print() {
-	log.Println("the reward state is:")
-	st.ThisEpochReward = big.Div(st.ThisEpochReward, abi.TokenPrecision)
+	actorlog.L.Info("the reward state is:")
 	byte, err := json.Marshal(st)
 	if err != nil {
-		log.Println("reward state json marshal error:", zap.String("error", err.Error()))
+		actorlog.L.Info("reward state json marshal error:", zap.String("error", err.Error()))
 	}
 	var out bytes.Buffer
 	json.Indent(&out, byte, "", "\t")
+	actorlog.L.Info(out.String())
 	log.Println(out.String())
-	log.Println("")
 }

@@ -2,6 +2,8 @@ package reward
 
 import (
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
+	"go.uber.org/zap"
 
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
@@ -10,6 +12,7 @@ import (
 	exitcode "github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
 	. "github.com/filecoin-project/specs-actors/actors/util"
 	adt "github.com/filecoin-project/specs-actors/actors/util/adt"
+	big2 "math/big"
 )
 
 type Actor struct{}
@@ -55,6 +58,7 @@ type AwardBlockRewardParams struct {
 // The reward is reduced before the residual is credited to the block producer, by:
 // - a penalty amount, provided as a parameter, which is burnt,
 func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) *adt.EmptyValue {
+	actorlog.L.Info("call AwardBlockReward",zap.Any("epoch",rt.CurrEpoch()),zap.Any("minerAddr",params.Miner),zap.Any("winCount",params.WinCount))
 	rt.ValidateImmediateCallerIs(builtin.SystemActorAddr)
 	AssertMsg(rt.CurrentBalance().GreaterThanEqual(params.GasReward),
 		"actor current balance %v insufficient to pay gas reward %v", rt.CurrentBalance(), params.GasReward)
@@ -69,7 +73,9 @@ func (a Actor) AwardBlockReward(rt vmr.Runtime, params *AwardBlockRewardParams) 
 	penalty := abi.NewTokenAmount(0)
 	var st State
 	rt.State().Readonly(&st)
-
+	rat := &big2.Rat{}
+	tmp,_:=rat.SetFrac(st.ThisEpochReward.Int,abi.TokenPrecision.Int).Float64()
+	actorlog.L.Info("AwardBlockReward",zap.Any("thisEpochReward",st.ThisEpochReward),zap.Any("thisEpochReward",tmp))
 	blockReward := big.Mul(st.ThisEpochReward, big.NewInt(params.WinCount))
 	blockReward = big.Div(blockReward, big.NewInt(builtin.ExpectedLeadersPerEpoch))
 
@@ -124,6 +130,7 @@ func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *ThisEpochRewa
 // This is only invoked for non-empty tipsets, but catches up any number of null
 // epochs to compute the next epoch reward.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
+	actorlog.L.Info("UpdateNetworkKPI",zap.Any("epoch",rt.CurrEpoch()),zap.Any("currRealizedPower",*currRealizedPower))
 	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
@@ -133,13 +140,19 @@ func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePo
 	rt.State().Transaction(&st, func() interface{} {
 		// if there were null runs catch up the computation until
 		// st.Epoch == rt.CurrEpoch()
+		actorlog.L.Info("UpdateNetworkKPI",zap.Any("stEpoch",st.Epoch))
+		st.Print()
 		for st.Epoch < rt.CurrEpoch() {
 			// Update to next epoch to process null rounds
 			st.updateToNextEpoch(*currRealizedPower)
 		}
 
 		st.updateToNextEpochWithReward(*currRealizedPower)
+		actorlog.L.Info("the status after UpdateNetworkKPI")
+		st.Print()
+		actorlog.L.Info("~~~~~~~~~~~~~~~~~~~~~")
 		return nil
 	})
+	actorlog.L.Info("*************************")
 	return nil
 }
