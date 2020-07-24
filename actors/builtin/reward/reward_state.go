@@ -645,11 +645,14 @@ func (st *State) Print() {
 }
 
 func (r *Record) SaveToFile() error {
-	b, err := json.MarshalIndent(r, "", "  ")
+/*	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return xerrors.Errorf("marshaling Record file: %w", err)
+	}*/
+	b ,err:= json.Marshal(r)
 	if err != nil {
 		return xerrors.Errorf("marshaling Record file: %w", err)
 	}
-
 	if err := ioutil.WriteFile("record.json", b, 0644); err != nil {
 		return xerrors.Errorf("persisting storage config (%s): %w", "record.json", err)
 	}

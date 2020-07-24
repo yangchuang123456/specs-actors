@@ -204,9 +204,9 @@ func Test_BaseLinePower(t *testing.T) {
 }
 
 func Test_EconomyModel(t *testing.T) {
-	//epoch := builtin.EpochsInDay * 30
-	//epoch := builtin.EpochsInDay
-	epoch := 1000
+	//epoch := builtin.EpochsInDay * 365
+	epoch := builtin.EpochsInDay*100
+	//epoch := 100
 	state := State{
 		CumsumBaseline:         big.Zero(),
 		CumsumRealized:         big.Zero(),
@@ -224,16 +224,16 @@ func Test_EconomyModel(t *testing.T) {
 	//state.Print()
 	state.updateToNextEpochWithRewardForTest(big.NewInt(0), genesisPower)
 	log.Print(state)
-	//network add 35 PB one day
-	TotalOneDayAdd := big.Lsh(big.NewInt(35), 50)
+	//network add 10 PB one day
+	TotalOneDayAdd := big.Lsh(big.NewInt(10), 50)
 	TotalOneEpochAdd := big.Div(TotalOneDayAdd, big.NewInt(builtin.EpochsInDay))
 	//addEpochPower := big.Lsh(big.NewInt(2), 40)
 	//totalPower := big.NewInt(0)
 	//epoch := builtin.EpochsInYear
 
-	//IPFSMain add 55GB one day
-	IPFSMainOnHourAddEpoch := big.Lsh(big.NewInt(55), 30)
-	IPFSMainEpochAddPower := big.Div(IPFSMainOnHourAddEpoch, big.NewInt(builtin.EpochsInHour))
+	//IPFSMain add %5 totalAddPower one day
+	//IPFSMainOnHourAddEpoch := big.Div(big.Mul(TotalOneEpochAdd,big.NewInt(5)),big.NewInt(100))
+	IPFSMainEpochAddPower := big.Div(big.Mul(TotalOneEpochAdd,big.NewInt(5)),big.NewInt(100))
 
 	currentEpochRealizedPower := genesisPower
 	i := 0
@@ -244,6 +244,6 @@ func Test_EconomyModel(t *testing.T) {
 	}
 	log.Println("the point is:", )
 	state.Record.PrintPointAccordingToPointNumber(10)
-
+	state.Record.SaveToFile()
 	//pointNumber := 10
 }
