@@ -3,6 +3,7 @@ package reward
 import (
 	"bytes"
 	"fmt"
+	"log"
 	gbig "math/big"
 	"testing"
 
@@ -12,13 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/xorcare/golden"
 )
-
-func q128ToF(x big.Int) float64 {
-	q128 := new(gbig.Int).SetInt64(1)
-	q128 = q128.Lsh(q128, precision)
-	res, _ := new(gbig.Rat).SetFrac(x.Int, q128).Float64()
-	return res
-}
 
 func TestComputeRTeta(t *testing.T) {
 	baselinePowerAt := func(epoch abi.ChainEpoch) abi.StoragePower {
@@ -76,7 +70,6 @@ func TestSimpleRewrad(t *testing.T) {
 
 	golden.Assert(t, b.Bytes())
 }
-
 
 func TestBaselineRewardGrowth(t *testing.T) {
 
@@ -139,15 +132,115 @@ func TestBaselineRewardGrowth(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		years := int64(1)
+		log.Println("baselineInYears startVal is:", testCase.StartVal)
 		end := baselineInYears(testCase.StartVal, abi.ChainEpoch(1))
-
+		log.Println("baselineInYears end is:", end)
 		multiplier := big.Exp(big.NewInt(3), big.NewInt(years)) // keeping this generalized in case we want to test more years
+		log.Println("the multiplier is:", multiplier)
 		expected := big.Mul(testCase.StartVal, multiplier)
+		log.Println("the expected is:", expected)
 		diff := big.Sub(expected, end)
 
 		perrFrac := gbig.NewRat(1, 1).SetFrac(diff.Int, expected.Int)
 		perr, _ := perrFrac.Float64()
-
+		log.Println("the perr is:", perr)
+		log.Println("")
 		assert.Less(t, perr, testCase.ErrBound)
 	}
+}
+
+func Test_baselineGrow(t *testing.T) {
+	baselineInYears := func(start abi.StoragePower, x abi.ChainEpoch) abi.StoragePower {
+		baseline := start
+		for i := abi.ChainEpoch(0); i < x*builtin.EpochsInYear; i++ {
+			baseline = BaselinePowerFromPrev(baseline)
+			//log.Println("the baseline is:",baseline)
+		}
+		return baseline
+	}
+	startPower := InitBaselinePower()
+	log.Println("the BaselineInitialValue is:", BaselineInitialValue)
+	log.Println("the startPower is:", startPower)
+	end := baselineInYears(startPower, 1)
+	log.Println("the end is:", end)
+}
+
+func Test_BaselinePowerNextEpoch(t *testing.T) {
+	log.Println("the BaselineInitialValue is:", BaselineInitialValue)
+	rat := gbig.NewRat(1, 1)
+	precision := big.Lsh(big.NewInt(1), 128)
+	rat.SetFrac(BaselineExponent.Int, precision.Int)
+	f, _ := rat.Float64()
+	log.Println("the BaselineExponent is:", f)
+	nextEpoch := BaselinePowerFromPrev(BaselineInitialValue)
+	log.Println("the nex epoch baseline power is:", nextEpoch)
+	log.Println("the base total supply is:", big.NewInt(900e6))
+	log.Println("the 1e-3 is:", 1e-3)
+	st := State{}
+	st.Print()
+	//reward.BaselinePowerNextEpoch(abi.StoragePower{})
+}
+
+func Test_BaseLinePower(t *testing.T) {
+	//addEpochPower := big.Lsh(big.NewInt(2), 40)
+	onDayAddEpoch := big.Lsh(big.NewInt(20), 50)
+	addEpochPower := big.Div(onDayAddEpoch, big.NewInt(builtin.EpochsInDay))
+
+	baseLinePower := big.Lsh(big.NewInt(2), 60)
+	totalPower := big.NewInt(0)
+	currentEpochPower := big.NewInt(4096)
+	//currentBaselineValue := reward.BaselineInitialValue
+	for i := 0; ; i++ {
+		currentEpochPower = big.Add(addEpochPower, currentEpochPower)
+		//if currentEpochPower.Cmp()
+		totalPower = big.Add(totalPower, currentEpochPower)
+		if totalPower.Cmp(baseLinePower.Int) >= 0 {
+			log.Println("arrive base line", i)
+			return
+		}
+	}
+}
+
+func Test_EconomyModel(t *testing.T) {
+	epoch := builtin.EpochsInDay * 30
+	state := State{
+		CumsumBaseline:         big.Zero(),
+		CumsumRealized:         big.Zero(),
+		EffectiveNetworkTime:   0,
+		EffectiveBaselinePower: BaselineInitialValue,
+		ThisEpochReward:        big.Zero(),
+		ThisEpochBaselinePower: InitBaselinePower(),
+		Epoch:                  -1,
+		Record:                 NewRewardRecord(int64(epoch)),
+	}
+
+	//genesisPower 720T
+	genesisPower := big.Lsh(big.NewInt(720), 40)
+	state.updateToNextEpochWithRewardForTest(big.NewInt(0),genesisPower)
+
+	//network add 25 PB one day
+	TotalOneDayAdd := big.Lsh(big.NewInt(35), 50)
+	TotalOneEpochAdd := big.Div(TotalOneDayAdd, big.NewInt(builtin.EpochsInDay))
+	//addEpochPower := big.Lsh(big.NewInt(2), 40)
+	//totalPower := big.NewInt(0)
+	//epoch := builtin.EpochsInYear
+
+	//IPFSMain add 55GB one day
+	IPFSMainOnHourAddEpoch := big.Lsh(big.NewInt(55), 30)
+	IPFSMainEpochAddPower := big.Div(IPFSMainOnHourAddEpoch, big.NewInt(builtin.EpochsInHour))
+
+	currentEpochRealizedPower := genesisPower
+	i := 0
+	for i = 0; i < epoch; i++ {
+		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
+		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd,currentEpochRealizedPower)
+		state.paddingIPFSMain(IPFSMainEpochAddPower)
+	}
+	log.Println("the currentEpochPower is:", )
+	log.Println("the i is:", i)
+
+	pointNumber := 10
+
+
+
 }

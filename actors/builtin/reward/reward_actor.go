@@ -131,7 +131,7 @@ func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *ThisEpochRewa
 // epochs to compute the next epoch reward.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
 	actorlog.L.Info("UpdateNetworkKPI",zap.Any("epoch",rt.CurrEpoch()),zap.Any("currRealizedPower",*currRealizedPower))
-	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
+//	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
 	}

@@ -5,6 +5,7 @@ import (
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
 	"github.com/filecoin-project/specs-actors/tools/dlog/actorlog"
 	"go.uber.org/zap"
+	gbig "math/big"
 )
 
 const BaselineExponentString = "340282663082994238536867392845056089438"
@@ -16,6 +17,13 @@ var BaselineInitialValue big.Int // Q.0
 func init() {
 	BaselineExponent = big.MustFromString(BaselineExponentString)
 	BaselineInitialValue = big.Lsh(big.NewInt(1), 60) // 1 EiB
+}
+
+func q128ToF(x big.Int) float64 {
+	q128 := new(gbig.Int).SetInt64(1)
+	q128 = q128.Lsh(q128, precision)
+	res, _ := new(gbig.Rat).SetFrac(x.Int, q128).Float64()
+	return res
 }
 
 // Initialize baseline power for epoch -1 so that baseline power at epoch 0 is
@@ -35,8 +43,11 @@ func BaselinePowerFromPrev(prevEpochBaselinePower abi.StoragePower) abi.StorageP
 }
 
 // These numbers are placeholders, but should be in units of attoFIL, 10^-18 FIL
-var SimpleTotal = big.Mul(big.NewInt(100e6), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
-var BaselineTotal = big.Mul(big.NewInt(900e6), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
+//var SimpleTotal = big.Mul(big.NewInt(100e6), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
+//var BaselineTotal = big.Mul(big.NewInt(900e6), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
+
+var SimpleTotal = big.Mul(big.NewInt(14e7), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
+var BaselineTotal = big.Mul(big.NewInt(126e7), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
 
 // Computes RewardTheta which is is precise fractional value of effectiveNetworkTime.
 // The effectiveNetworkTime is defined by CumsumBaselinePower(theta) == CumsumRealizedPower
@@ -45,8 +56,8 @@ var BaselineTotal = big.Mul(big.NewInt(900e6), big.NewInt(1e18)) // 900M for tes
 // The effectiveNetworkTime argument is ceiling of theta.
 // The result is a fractional effectiveNetworkTime (theta) in Q.128 format.
 func computeRTheta(effectiveNetworkTime abi.ChainEpoch, baselinePowerAtEffectiveNetworkTime, cumsumRealized, cumsumBaseline big.Int) big.Int {
-	actorlog.L.Info("computeRTheta", zap.Any("effectiveNetworkTime", effectiveNetworkTime), zap.Any("baselinePowerAtEffectiveNetworkTime", baselinePowerAtEffectiveNetworkTime), zap.Any("cumsumRealized", cumsumRealized),
-		zap.Any("cumsumBaseline", cumsumBaseline))
+/*	actorlog.L.Info("computeRTheta", zap.Any("effectiveNetworkTime", effectiveNetworkTime), zap.Any("baselinePowerAtEffectiveNetworkTime", baselinePowerAtEffectiveNetworkTime), zap.Any("cumsumRealized", cumsumRealized),
+		zap.Any("cumsumBaseline", cumsumBaseline))*/
 	var rewardTheta big.Int
 	if effectiveNetworkTime != 0 {
 		rewardTheta = big.NewInt(int64(effectiveNetworkTime)) // Q.0
@@ -59,7 +70,7 @@ func computeRTheta(effectiveNetworkTime abi.ChainEpoch, baselinePowerAtEffective
 		// special case for initialization
 		rewardTheta = big.Zero()
 	}
-	actorlog.L.Info("the rewardTheta is:", zap.Any("rewardTheta", rewardTheta))
+	//actorlog.L.Info("the rewardTheta is:", zap.Any("rewardTheta", rewardTheta))
 	return rewardTheta
 }
 
@@ -84,10 +95,25 @@ func computeReward(epoch abi.ChainEpoch, prevTheta, currTheta big.Int) abi.Token
 	simpleReward = big.Rsh(simpleReward, precision)                          // Q.256 >> 128 => Q.128
 
 	baselineReward := big.Sub(computeBaselineSupply(currTheta), computeBaselineSupply(prevTheta)) // Q.128
-	actorlog.L.Info("the baseline and simple Reward is:", zap.Any("baseLine", big.Rsh(baselineReward, precision)), zap.Any("simple", big.Rsh(simpleReward, precision)))
-	reward := big.Add(simpleReward, baselineReward) // Q.128
+	//actorlog.L.Info("the baseline and simple Reward is:", zap.Any("baseLine", big.Rsh(baselineReward, precision)), zap.Any("simple", big.Rsh(simpleReward, precision)))
+	//reward := big.Add(simpleReward, baselineReward) // Q.128
+	reward:=baselineReward
 
 	return big.Rsh(reward, precision) // Q.128 => Q.0
+}
+
+func computeRewardForTest(epoch abi.ChainEpoch, prevTheta, currTheta big.Int) (abi.TokenAmount,abi.TokenAmount,abi.TokenAmount) {
+	simpleReward := big.Mul(SimpleTotal, expLamSubOne)    //Q.0 * Q.128 =>  Q.128
+	epochLam := big.Mul(big.NewInt(int64(epoch)), lambda) // Q.0 * Q.128 => Q.128
+
+	simpleReward = big.Mul(simpleReward, big.Int{Int: expneg(epochLam.Int)}) // Q.128 * Q.128 => Q.256
+	simpleReward = big.Rsh(simpleReward, precision)                          // Q.256 >> 128 => Q.128
+
+	baselineReward := big.Sub(computeBaselineSupply(currTheta), computeBaselineSupply(prevTheta)) // Q.128
+	//actorlog.L.Info("the baseline and simple Reward is:", zap.Any("baseLine", big.Rsh(baselineReward, precision)), zap.Any("simple", big.Rsh(simpleReward, precision)))
+	reward := big.Add(simpleReward, baselineReward) // Q.128
+
+	return big.Rsh(reward, precision),big.Rsh(simpleReward,precision),big.Rsh(baselineReward,precision) // Q.128 => Q.0
 }
 
 // Computes baseline supply based on theta in Q.128 format.
@@ -102,6 +128,6 @@ func computeBaselineSupply(theta big.Int) big.Int {
 	one := big.NewInt(1)
 	one = big.Lsh(one, precision) // Q.0 => Q.128
 	oneSub := big.Sub(one, eTL)   // Q.128
-	actorlog.L.Info("computeBaselineSupply", zap.Any("baseLineSupply", big.Rsh(big.Div(big.Mul(BaselineTotal, oneSub), abi.TokenPrecision), precision)))
+	actorlog.L.Info("computeBaselineSupply", zap.Any("baseLineSupply", big.Div(big.Mul(BaselineTotal, oneSub), abi.TokenPrecision)))
 	return big.Mul(BaselineTotal, oneSub) // Q.0 * Q.128 => Q.128
 }

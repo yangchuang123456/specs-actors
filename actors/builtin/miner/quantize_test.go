@@ -1,12 +1,27 @@
 package miner
 
 import (
+	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/filecoin-project/specs-actors/actors/abi"
 )
+
+func Test_QuantizeUp(t *testing.T) {
+	for unit := 1; unit <= 5; unit++ {
+		ret := quantizeUp(50, abi.ChainEpoch(3), 2)
+		log.Println("the ret is:",ret)
+	}
+
+	log.Println("")
+
+	for offsetSeed := 1; offsetSeed <= 50; offsetSeed++ {
+		ret := quantizeUp(50, abi.ChainEpoch(3), abi.ChainEpoch(offsetSeed))
+		log.Println("the ret is:",ret)
+	}
+}
 
 func TestQuantizeUp(t *testing.T) {
 	t.Run("no quantization", func(t *testing.T) {

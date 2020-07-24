@@ -136,7 +136,6 @@ func getState(rt *mock.Runtime) *reward.State {
 	return &st
 }
 
-
 func Test_reward(t *testing.T) {
 	actor := rewardHarness{reward.Actor{}, t}
 	rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
@@ -150,29 +149,27 @@ func Test_reward(t *testing.T) {
 	rt.SetCaller(builtin.StoragePowerActorAddr, builtin.StoragePowerActorCodeID)
 	rt.ExpectValidateCallerAny()
 	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
-	currRealizedPower := reward.BaselinePowerNextEpoch(reward.BaselineInitialValue)
-	log.Println("the currRealizedPower is:",currRealizedPower)
+	currRealizedPower := reward.BaselineInitialValue
+	log.Println("the currRealizedPower is:", currRealizedPower)
 	//	epochAddPower = big.NewInt(0)
-	for i:=1;i<=100;i++{
-
-		rt.Call(actor.UpdateNetworkKPI,&currRealizedPower)
+	for i := 1; i <= 100; i++ {
+		preRealizedPower := currRealizedPower
+		currRealizedPower = reward.BaselinePowerFromPrev(currRealizedPower)
+		addPower := big.Sub(currRealizedPower, preRealizedPower)
+		rt.Call(actor.UpdateNetworkKPI, &addPower)
 		//currRealizedPower=big.Add(currRealizedPower,epochAddPower)
 		st.Print()
-/*		if i>=50{
-			currRealizedPower = big.NewInt(0)
-		}*/
-		currRealizedPower = reward.BaselinePowerNextEpoch(currRealizedPower)
-		log.Println("")
+		/*		if i>=50{
+				currRealizedPower = big.NewInt(0)
+			}*/
+		currRealizedPower = reward.BaselinePowerFromPrev(currRealizedPower)
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 	}
 }
 
-func Test_BaselinePowerNextEpoch(t *testing.T){
-	log.Println("the BaselineInitialValue is:",reward.BaselineInitialValue)
-	nextEpoch:=reward.BaselinePowerNextEpoch(reward.BaselineInitialValue)
-	log.Println("the nex epoch baseline power is:",nextEpoch)
-	log.Println("the base total supply is:",big.NewInt(900e6))
 
-	st := reward.State{}
-	st.Print()
-	//reward.BaselinePowerNextEpoch(abi.StoragePower{})
-}
+
+

@@ -76,7 +76,7 @@ func PledgePenaltyForTermination(initialPledge abi.TokenAmount, sectorAge abi.Ch
 // In plain language, the pledge requirement is a multiple of the block reward expected to be earned by the
 // newly-committed power, holding the per-epoch block reward constant (though in reality it will change over time).
 func InitialPledgeForPower(qaPower abi.StoragePower, networkQAPower, baselinePower abi.StoragePower, networkTotalPledge abi.TokenAmount, epochTargetReward abi.TokenAmount, networkCirculatingSupply abi.TokenAmount) abi.TokenAmount {
-	return big.NewInt(0)
+	//return big.NewInt(0)
 	ipBase := big.Mul(InitialPledgeFactor, ExpectedDayRewardForPower(epochTargetReward, networkQAPower, qaPower))
 
 	lockTargetNum := big.Mul(LockTargetFactorNum, networkCirculatingSupply)
