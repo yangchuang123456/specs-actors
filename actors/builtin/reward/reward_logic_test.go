@@ -139,6 +139,7 @@ func TestBaselineRewardGrowth(t *testing.T) {
 		log.Println("the multiplier is:", multiplier)
 		expected := big.Mul(testCase.StartVal, multiplier)
 		log.Println("the expected is:", expected)
+
 		diff := big.Sub(expected, end)
 
 		perrFrac := gbig.NewRat(1, 1).SetFrac(diff.Int, expected.Int)
@@ -163,6 +164,7 @@ func Test_baselineGrow(t *testing.T) {
 	log.Println("the startPower is:", startPower)
 	end := baselineInYears(startPower, 1)
 	log.Println("the end is:", end)
+	log.Println("the end/start is:", big.Div(end, startPower))
 }
 
 func Test_BaselinePowerNextEpoch(t *testing.T) {
@@ -202,7 +204,9 @@ func Test_BaseLinePower(t *testing.T) {
 }
 
 func Test_EconomyModel(t *testing.T) {
-	epoch := builtin.EpochsInDay * 30
+	//epoch := builtin.EpochsInDay * 30
+	//epoch := builtin.EpochsInDay
+	epoch := 1000
 	state := State{
 		CumsumBaseline:         big.Zero(),
 		CumsumRealized:         big.Zero(),
@@ -211,14 +215,16 @@ func Test_EconomyModel(t *testing.T) {
 		ThisEpochReward:        big.Zero(),
 		ThisEpochBaselinePower: InitBaselinePower(),
 		Epoch:                  -1,
-		Record:                 NewRewardRecord(int64(epoch)),
+		Record:                 NewRewardRecord(int64(epoch + 1)),
 	}
-
 	//genesisPower 720T
 	genesisPower := big.Lsh(big.NewInt(720), 40)
-	state.updateToNextEpochWithRewardForTest(big.NewInt(0),genesisPower)
-
-	//network add 25 PB one day
+	//state.updateToNextEpoch(genesisPower)
+	log.Print(state)
+	//state.Print()
+	state.updateToNextEpochWithRewardForTest(big.NewInt(0), genesisPower)
+	log.Print(state)
+	//network add 35 PB one day
 	TotalOneDayAdd := big.Lsh(big.NewInt(35), 50)
 	TotalOneEpochAdd := big.Div(TotalOneDayAdd, big.NewInt(builtin.EpochsInDay))
 	//addEpochPower := big.Lsh(big.NewInt(2), 40)
@@ -233,14 +239,11 @@ func Test_EconomyModel(t *testing.T) {
 	i := 0
 	for i = 0; i < epoch; i++ {
 		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
-		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd,currentEpochRealizedPower)
+		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd, currentEpochRealizedPower)
 		state.paddingIPFSMain(IPFSMainEpochAddPower)
 	}
-	log.Println("the currentEpochPower is:", )
-	log.Println("the i is:", i)
+	log.Println("the point is:", )
+	state.Record.PrintPointAccordingToPointNumber(10)
 
-	pointNumber := 10
-
-
-
+	//pointNumber := 10
 }
