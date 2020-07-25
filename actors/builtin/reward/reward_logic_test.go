@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	gbig "math/big"
+	"os"
+	"runtime/pprof"
+	//_ "net/http/pprof"
 	"testing"
 
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
@@ -206,7 +209,18 @@ func Test_BaseLinePower(t *testing.T) {
 func Test_EconomyModel(t *testing.T) {
 	//epoch := builtin.EpochsInDay * 365
 	//epoch := builtin.EpochsInDay*100
-	epoch := 10
+	cpuFile, err := os.Create("Profile.cpu")
+	assert.NoError(t,err)
+	defer cpuFile.Close()
+
+	memFile, err := os.Create("Profile.mem")
+	assert.NoError(t,err)
+	defer memFile.Close()
+
+	pprof.StartCPUProfile(cpuFile)
+	pprof.WriteHeapProfile(memFile)
+
+	epoch := 3000
 	pointNumber  := 4
 	startEpoch := 1
 	step := (epoch-startEpoch)/pointNumber
@@ -243,10 +257,12 @@ func Test_EconomyModel(t *testing.T) {
 	for i = 0; i < epoch; i++ {
 		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
 		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd,IPFSMainEpochAddPower ,currentEpochRealizedPower)
-		state.PrintCurrentEpoch()
+		//state.PrintCurrentEpoch()
 	}
 	log.Println("the point is:", )
 	state.Record.PrintRecordPoint()
 	state.Record.SaveToFile()
+
+	pprof.StopCPUProfile()
 	//pointNumber := 10
 }
