@@ -52,8 +52,8 @@ func BaselinePowerFromPrev(prevEpochBaselinePower abi.StoragePower) abi.StorageP
 //var SimpleTotal = big.Mul(big.NewInt(100e6), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
 //var BaselineTotal = big.Mul(big.NewInt(900e6), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
 
-var SimpleTotal = big.Mul(big.NewInt(14e7), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
-var BaselineTotal = big.Mul(big.NewInt(126e7), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
+var SimpleTotal = big.Mul(big.NewInt(42e7), big.NewInt(1e18))   // 100M for testnet, PARAM_FINISH
+var BaselineTotal = big.Mul(big.NewInt(98e7), big.NewInt(1e18)) // 900M for testnet, PARAM_FINISH
 
 // Computes RewardTheta which is is precise fractional value of effectiveNetworkTime.
 // The effectiveNetworkTime is defined by CumsumBaselinePower(theta) == CumsumRealizedPower

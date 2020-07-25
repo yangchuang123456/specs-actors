@@ -26,6 +26,40 @@ type Spacetime = big.Int
 
 type OneEpochRecord struct {
 	Epoch                     abi.ChainEpoch
+	BaseLineReward            abi.TokenAmount
+	SimpleReward              abi.TokenAmount
+	EpochReward               abi.TokenAmount
+	InvestorAndProtoRelease   abi.TokenAmount
+	NetworkCirculatingSupply  abi.TokenAmount
+	NetWorkTotalReward        *abi.TokenAmount
+	NetWorkTotalDeposit       *abi.TokenAmount
+	NetWorkRewardLockFunds    *abi.TokenAmount
+	NetWorkDepositLockFunds   *abi.TokenAmount
+	NetWorkRewardUnLockFunds  *abi.TokenAmount
+	NetWorkDepositUnLockFunds *abi.TokenAmount
+
+	CumSumRealized         abi.StoragePower
+	CumSumBaselinePower    abi.StoragePower
+	EffectiveNetworkTime   abi.ChainEpoch
+	TotalNetworkPower      abi.StoragePower
+	BaseLinePower          abi.StoragePower
+	EffectiveBaselinePower abi.StoragePower
+
+	IPFSMainAddPower       abi.StoragePower
+	IPFSMainTotalPower     abi.StoragePower
+	IPFSMainExpectedReward abi.TokenAmount
+	IPFSMainTotalReward    *abi.TokenAmount
+
+	IPFSMainIP                 abi.TokenAmount
+	IPFSMainTotalDeposit       *abi.TokenAmount
+	IPFSMainRewardLockFunds    *abi.TokenAmount
+	IPFSMainDepositLockFunds   *abi.TokenAmount
+	IPFSMainRewardUnLockFunds  *abi.TokenAmount
+	IPFSMainDepositUnLockFunds *abi.TokenAmount
+}
+
+type OneEpochRecordPrint struct {
+	Epoch                     abi.ChainEpoch
 	BaseLineReward            float64
 	SimpleReward              float64
 	EpochReward               float64
@@ -60,8 +94,14 @@ type OneEpochRecord struct {
 
 //for test
 type Record struct {
-	CurrentEpoch abi.ChainEpoch
-	Store        adt.Store
+	RecordStartEpoch       abi.ChainEpoch
+	RecordStep             abi.ChainEpoch
+	RecordNumber           int64
+	CurrentNeedRecordEpoch abi.ChainEpoch
+	CurrentEpoch           abi.ChainEpoch
+	Store                  adt.Store
+
+	CirculateEnoughEpoch abi.ChainEpoch
 
 	IPFSMainRewardLockFund  *cid.Cid // Array, AMT[ChainEpoch]TokenAmount
 	IPFSMainDepositLockFund *cid.Cid
@@ -69,37 +109,13 @@ type Record struct {
 	NetWorkRewardLockFund  *cid.Cid
 	NetWorkDepositLockFund *cid.Cid
 
-	Epoch                      []abi.ChainEpoch
-	BaseLineReward             []abi.TokenAmount
-	SimpleReward               []abi.TokenAmount
-	EpochReward                []abi.TokenAmount
-	InvestorAndProtoRelease    []abi.TokenAmount
-	NetworkCirculatingSupply   []abi.TokenAmount
-	NetWorkTotalReward         []abi.TokenAmount
-	NetWorkTotalDeposit        []abi.TokenAmount
-	NetWorkRewardLockFunds     []abi.TokenAmount
-	NetWorkDepositLockFunds    []abi.TokenAmount
-	NetWorkRewardUnLockFunds   []abi.TokenAmount
-	NetWorkDepositUnLockFunds  []abi.TokenAmount
-	CumSumRealized             []abi.StoragePower
-	CumSumBaselinePower        []abi.StoragePower
-	EffectiveNetworkTime       []abi.ChainEpoch
-	TotalNetworkPower          []abi.StoragePower
-	BaseLinePower              []abi.StoragePower
-	EffectiveBaselinePower     []abi.StoragePower
-	IPFSMainAddPower           []abi.StoragePower
-	IPFSMainTotalPower         []abi.StoragePower
-	IPFSMainExpectedReward     []abi.TokenAmount
-	IPFSMainTotalReward        []abi.TokenAmount
-	IPFSMainIP                 []abi.TokenAmount
-	IPFSMainTotalDeposit       []abi.TokenAmount
-	IPFSMainRewardLockFunds    []abi.TokenAmount
-	IPFSMainDepositLockFunds   []abi.TokenAmount
-	IPFSMainRewardUnLockFunds  []abi.TokenAmount
-	IPFSMainDepositUnLockFunds []abi.TokenAmount
+	LastEpochRecord    OneEpochRecord
+	CurrentEpochRecord OneEpochRecord
+	NeedRecordEpoch    []OneEpochRecord
 }
 
 type PrintRecord struct {
+	CirculateEnoughEpoch       abi.ChainEpoch
 	Epoch                      []abi.ChainEpoch
 	BaseLineReward             []float64
 	SimpleReward               []float64
@@ -165,7 +181,9 @@ func NewPrintRecord(epoch int64) *PrintRecord {
 	}
 }
 
-func NewRewardRecord(epoch int64) *Record {
+var CirculateNotEnough = abi.ChainEpoch(-2) //-2标识未到达
+
+func NewRewardRecord(recordStartEpoch, stepEpoch abi.ChainEpoch, RecordNumber int64) *Record {
 	store := ipld.NewADTStore(context.Background())
 	iPFSMainRewardLockFund, err := adt.MakeEmptyArray(store).Root()
 	if err != nil {
@@ -185,44 +203,20 @@ func NewRewardRecord(epoch int64) *Record {
 	}
 
 	return &Record{
+		RecordStartEpoch:        recordStartEpoch,
+		RecordStep:              stepEpoch,
+		RecordNumber:            RecordNumber,
+		CurrentNeedRecordEpoch:  recordStartEpoch,
+		CirculateEnoughEpoch:    CirculateNotEnough,
 		Store:                   store,
 		CurrentEpoch:            abi.ChainEpoch(0),
 		IPFSMainRewardLockFund:  &iPFSMainRewardLockFund,
 		IPFSMainDepositLockFund: &iPFSMainDepositLockFund,
 		NetWorkRewardLockFund:   &netWorkRewardLockFund,
 		NetWorkDepositLockFund:  &netWorkDepositLockFund,
-
-		Epoch:                     make([]abi.ChainEpoch, epoch),
-		BaseLineReward:            make([]abi.TokenAmount, epoch),
-		SimpleReward:              make([]abi.TokenAmount, epoch),
-		EpochReward:               make([]abi.TokenAmount, epoch),
-		InvestorAndProtoRelease:   make([]abi.TokenAmount, epoch),
-		NetworkCirculatingSupply:  make([]abi.TokenAmount, epoch),
-		NetWorkTotalReward:        make([]abi.TokenAmount, epoch),
-		NetWorkTotalDeposit:       make([]abi.TokenAmount, epoch),
-		NetWorkRewardLockFunds:    make([]abi.TokenAmount, epoch),
-		NetWorkDepositLockFunds:   make([]abi.TokenAmount, epoch),
-		NetWorkRewardUnLockFunds:  make([]abi.TokenAmount, epoch),
-		NetWorkDepositUnLockFunds: make([]abi.TokenAmount, epoch),
-
-
-		CumSumRealized:         make([]abi.StoragePower, epoch),
-		CumSumBaselinePower:    make([]abi.StoragePower, epoch),
-		EffectiveNetworkTime:   make([]abi.ChainEpoch, epoch),
-		TotalNetworkPower:      make([]abi.StoragePower, epoch),
-		BaseLinePower:          make([]abi.StoragePower, epoch),
-		EffectiveBaselinePower: make([]abi.StoragePower, epoch),
-
-		IPFSMainTotalPower:         make([]abi.StoragePower, epoch),
-		IPFSMainExpectedReward:     make([]abi.TokenAmount, epoch),
-		IPFSMainAddPower:           make([]abi.TokenAmount, epoch),
-		IPFSMainIP:                 make([]abi.TokenAmount, epoch),
-		IPFSMainTotalReward:        make([]abi.TokenAmount, epoch),
-		IPFSMainTotalDeposit:       make([]abi.TokenAmount, epoch),
-		IPFSMainRewardLockFunds:    make([]abi.TokenAmount, epoch),
-		IPFSMainDepositLockFunds:   make([]abi.TokenAmount, epoch),
-		IPFSMainRewardUnLockFunds:  make([]abi.TokenAmount, epoch),
-		IPFSMainDepositUnLockFunds: make([]abi.TokenAmount, epoch),
+		LastEpochRecord:         OneEpochRecord{},
+		CurrentEpochRecord:      OneEpochRecord{},
+		NeedRecordEpoch:         make([]OneEpochRecord, 0),
 	}
 }
 
@@ -307,7 +301,7 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
 }
 
-func (st *State) updateToNextEpochWithRewardForTest(add, currRealizedPower abi.StoragePower) {
+func (st *State) updateToNextEpochWithRewardForTest(totalAdd, ipfsMainAdd, currRealizedPower abi.StoragePower) {
 	//log.Println("the current epoch is:", st.Epoch)
 	//st.PrintOneEpoch(st.Epoch)
 	prevRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.EffectiveBaselinePower, st.CumsumRealized, st.CumsumBaseline)
@@ -317,54 +311,62 @@ func (st *State) updateToNextEpochWithRewardForTest(add, currRealizedPower abi.S
 	totalReward, simpleReward, baseLineReward := computeRewardForTest(st.Epoch, prevRewardTheta, currRewardTheta)
 	st.ThisEpochReward = totalReward
 
-	st.Record.CurrentEpoch = st.Epoch
-	st.Record.Epoch[st.Epoch] = st.Epoch
-	st.Record.EffectiveNetworkTime[st.Epoch] = st.EffectiveNetworkTime
-	st.Record.BaseLinePower[st.Epoch] = st.ThisEpochBaselinePower
-	st.Record.CumSumBaselinePower[st.Epoch] = st.CumsumBaseline
-	st.Record.CumSumRealized[st.Epoch] = st.CumsumRealized
-	st.Record.TotalNetworkPower[st.Epoch] = currRealizedPower
-	st.Record.EffectiveBaselinePower[st.Epoch] = st.EffectiveBaselinePower
+	st.LastEpochRecord = st.CurrentEpochRecord
 
-	st.Record.EpochReward[st.Epoch] = totalReward
-	st.Record.SimpleReward[st.Epoch] = simpleReward
-	st.Record.BaseLineReward[st.Epoch] = baseLineReward
+	st.Record.CurrentEpoch = st.Epoch
+	st.Record.CurrentEpochRecord.Epoch = st.Epoch
+	st.Record.CurrentEpochRecord.EffectiveNetworkTime = st.EffectiveNetworkTime
+	st.Record.CurrentEpochRecord.BaseLinePower = st.ThisEpochBaselinePower
+	st.Record.CurrentEpochRecord.CumSumBaselinePower = st.CumsumBaseline
+	st.Record.CurrentEpochRecord.CumSumRealized = st.CumsumRealized
+	st.Record.CurrentEpochRecord.TotalNetworkPower = currRealizedPower
+	st.Record.CurrentEpochRecord.EffectiveBaselinePower = st.EffectiveBaselinePower
+
+	st.Record.CurrentEpochRecord.EpochReward = totalReward
+	st.Record.CurrentEpochRecord.SimpleReward = simpleReward
+	st.Record.CurrentEpochRecord.BaseLineReward = baseLineReward
 
 	if st.Epoch == 0 {
-		st.Record.InvestorAndProtoRelease[st.Epoch] = big.NewInt(0)
-		st.Record.NetworkCirculatingSupply[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkTotalReward[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkTotalDeposit[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkRewardLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkDepositLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkRewardUnLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.NetWorkDepositUnLockFunds[st.Epoch] = big.NewInt(0)
-
-		st.Record.IPFSMainAddPower[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainTotalPower[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainExpectedReward[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainTotalReward[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainIP[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainTotalDeposit[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainRewardLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainDepositLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainRewardUnLockFunds[st.Epoch] = big.NewInt(0)
-		st.Record.IPFSMainDepositUnLockFunds[st.Epoch] = big.NewInt(0)
+		st.Record.CurrentEpochRecord.InvestorAndProtoRelease = big.NewInt(0)
+		st.Record.CurrentEpochRecord.NetworkCirculatingSupply = big.NewInt(0)
+		st.Record.CurrentEpochRecord.IPFSMainAddPower = big.NewInt(0)
+		st.Record.CurrentEpochRecord.IPFSMainTotalPower = big.NewInt(0)
+		st.Record.CurrentEpochRecord.IPFSMainExpectedReward = big.NewInt(0)
+		st.Record.CurrentEpochRecord.IPFSMainIP = big.NewInt(0)
 	}
+
+	st.Record.CurrentEpochRecord.NetWorkTotalReward = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.NetWorkTotalDeposit = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.NetWorkRewardLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.NetWorkDepositLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.NetWorkRewardUnLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.NetWorkDepositUnLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainTotalReward = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainTotalDeposit = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainRewardLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainDepositLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainRewardUnLockFunds = &abi.TokenAmount{big2.NewInt(0)}
+	st.Record.CurrentEpochRecord.IPFSMainDepositUnLockFunds = &abi.TokenAmount{big2.NewInt(0)}
 
 	//正式计算抵押时，使用的power为qaPower,此处假设全网皆为cc扇区，不受deal和duration影响，直接使用rawPower计算
 	if st.Epoch > 0 {
-		qaPower := add
-		networkQAPower := st.Record.TotalNetworkPower[st.Epoch]
-		baselinePower := st.Record.BaseLinePower[st.Epoch]
-		networkTotalPledge := st.Record.NetWorkTotalDeposit[st.Epoch-1]
+		qaPower := totalAdd
+		networkQAPower := st.Record.CurrentEpochRecord.TotalNetworkPower
+		baselinePower := st.Record.CurrentEpochRecord.BaseLinePower
+		networkTotalPledge := *st.Record.LastEpochRecord.NetWorkTotalDeposit
 		epochTargetReward := st.ThisEpochReward
-		networkCirculatingSupply := st.NetworkCirculatingSupply[st.Epoch-1]
+		networkCirculatingSupply := st.LastEpochRecord.NetworkCirculatingSupply
 		currentNetWorkDeposit := InitialPledgeForPower(qaPower, networkQAPower, baselinePower, networkTotalPledge, epochTargetReward, networkCirculatingSupply)
 
 		st.Record.UpdateLockAndUnlockFunds(totalReward, &RewardVestingSpec, NetworkRewardLock)
 		st.Record.UpdateLockAndUnlockFunds(currentNetWorkDeposit, &PledgeVestingSpec, NetWorkDeposit)
 		st.Record.UpdateCirculatingSupply()
+	}
+	st.paddingIPFSMain(ipfsMainAdd)
+
+	if st.CurrentEpoch == st.CurrentNeedRecordEpoch {
+		st.NeedRecordEpoch = append(st.NeedRecordEpoch, st.CurrentEpochRecord)
+		st.CurrentNeedRecordEpoch += st.RecordStep
 	}
 }
 
@@ -507,66 +509,81 @@ func (r *Record) UpdateCirculatingSupply() {
 	//更新投资人和协议实验室
 	addValue := big.NewInt(0)
 	if r.CurrentEpoch > 0 && r.CurrentEpoch <= 183*builtin.EpochsInDay {
-		addValue = big.Div(big.Mul(big.NewInt(6938822776), big.NewInt(1e14)),big.NewInt(builtin.EpochsInDay))
+		addValue = big.Div(big.Mul(big.NewInt(6938822776), big.NewInt(1e14)), big.NewInt(builtin.EpochsInDay))
 		//addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
 	} else if r.CurrentEpoch > 183*builtin.EpochsInDay && r.CurrentEpoch <= 365*builtin.EpochsInDay {
 		//addValue = big.Div(big.Mul(big.NewInt(4745936072), big.NewInt(1e14)),big.NewInt(builtin.EpochsInDay))
 		addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
 	}
 
-	r.InvestorAndProtoRelease[r.CurrentEpoch] = big.Add(r.InvestorAndProtoRelease[r.CurrentEpoch-1], addValue)
+	r.CurrentEpochRecord.InvestorAndProtoRelease = big.Add(r.LastEpochRecord.InvestorAndProtoRelease, addValue)
 
-	totalMoney := big.Add(r.InvestorAndProtoRelease[r.CurrentEpoch],r.NetWorkTotalReward[r.CurrentEpoch])
-	totalLock := big.Add(r.NetWorkDepositLockFunds[r.CurrentEpoch],r.NetWorkRewardLockFunds[r.CurrentEpoch])
+	totalMoney := big.Add(r.CurrentEpochRecord.InvestorAndProtoRelease, *r.CurrentEpochRecord.NetWorkTotalReward)
+	totalLock := big.Add(*r.CurrentEpochRecord.NetWorkDepositLockFunds, *r.CurrentEpochRecord.NetWorkRewardLockFunds)
 
-	sub := big.Sub(totalMoney,totalLock)
-	if big.Cmp(sub,big.NewInt(0)) == -1{
+	sub := big.Sub(totalMoney, totalLock)
+	if big.Cmp(sub, big.NewInt(0)) == -1 {
 		sub = big.NewInt(0)
-		log.Println("total money can't support the power grow")
+	} else if r.CirculateEnoughEpoch == CirculateNotEnough {
+		r.CirculateEnoughEpoch = r.CurrentEpoch
 	}
-	r.NetworkCirculatingSupply[r.CurrentEpoch] = sub
+	r.CurrentEpochRecord.NetworkCirculatingSupply = sub
 }
 
 func (r *Record) UpdateLockAndUnlockFunds(vestingSum abi.TokenAmount, spec *VestSpec, lockType LockType) error {
 	var root *cid.Cid
-	var totalMoney, Locked, Unlocked []abi.TokenAmount
+	var totalMoney, Locked, Unlocked, lastUnlocked, lastTotalMoney *abi.TokenAmount
 	switch lockType {
 	case NetworkRewardLock:
 		root = r.NetWorkRewardLockFund
-		totalMoney = r.NetWorkTotalReward
-		Locked = r.NetWorkRewardLockFunds
-		Unlocked = r.NetWorkRewardUnLockFunds
+		lastTotalMoney = r.LastEpochRecord.NetWorkTotalReward
+		lastUnlocked = r.LastEpochRecord.NetWorkRewardUnLockFunds
+		totalMoney = r.CurrentEpochRecord.NetWorkTotalReward
+		Locked = r.CurrentEpochRecord.NetWorkRewardLockFunds
+		Unlocked = r.CurrentEpochRecord.NetWorkRewardUnLockFunds
 	case NetWorkDeposit:
 		root = r.NetWorkDepositLockFund
-		totalMoney = r.NetWorkTotalDeposit
-		Locked = r.NetWorkDepositLockFunds
-		Unlocked = r.NetWorkDepositUnLockFunds
+		lastTotalMoney = r.LastEpochRecord.NetWorkTotalDeposit
+		lastUnlocked = r.LastEpochRecord.NetWorkDepositUnLockFunds
+		totalMoney = r.CurrentEpochRecord.NetWorkTotalDeposit
+		Locked = r.CurrentEpochRecord.NetWorkDepositLockFunds
+		Unlocked = r.CurrentEpochRecord.NetWorkDepositUnLockFunds
 	case IPFSMainRewardLock:
 		root = r.IPFSMainRewardLockFund
-		totalMoney = r.IPFSMainTotalReward
-		Locked = r.IPFSMainRewardLockFunds
-		Unlocked = r.IPFSMainRewardUnLockFunds
+		lastTotalMoney = r.LastEpochRecord.IPFSMainTotalReward
+		lastUnlocked = r.LastEpochRecord.IPFSMainRewardUnLockFunds
+		totalMoney = r.CurrentEpochRecord.IPFSMainTotalReward
+		Locked = r.CurrentEpochRecord.IPFSMainRewardLockFunds
+		Unlocked = r.CurrentEpochRecord.IPFSMainRewardUnLockFunds
 	case IPFSMainDeposit:
 		root = r.IPFSMainDepositLockFund
-		totalMoney = r.IPFSMainTotalDeposit
-		Locked = r.IPFSMainDepositLockFunds
-		Unlocked = r.IPFSMainDepositUnLockFunds
+		lastTotalMoney = r.LastEpochRecord.IPFSMainTotalDeposit
+		lastUnlocked = r.LastEpochRecord.IPFSMainDepositUnLockFunds
+		totalMoney = r.CurrentEpochRecord.IPFSMainTotalDeposit
+		Locked = r.CurrentEpochRecord.IPFSMainDepositLockFunds
+		Unlocked = r.CurrentEpochRecord.IPFSMainDepositUnLockFunds
 	default:
 		return errors.New("lockType error")
 	}
+
+	//log.Println("the lockType,currentEpoch,vestingSum and lastTotalMoney is",lockType,r.CurrentEpoch,vestingSum,*lastTotalMoney)
 
 	err := AddLockedFunds(r.Store, root, r.CurrentEpoch, vestingSum, spec)
 	if err != nil {
 		return err
 	}
-	totalMoney[r.CurrentEpoch] = big.Add(totalMoney[r.CurrentEpoch-1], vestingSum)
+	//log.Println("last totalMoney is:",*lastTotalMoney)
+	*totalMoney = big.Add(*lastTotalMoney, vestingSum)
+	//log.Println("current totalMoney is:",*totalMoney)
 
 	tmp, err := UnlockVestedFunds(r.Store, root, r.CurrentEpoch)
 	if err != nil {
 		return err
 	}
-	Unlocked[r.CurrentEpoch] = big.Add(Unlocked[r.CurrentEpoch-1], tmp)
-	Locked[r.CurrentEpoch] = big.Sub(totalMoney[r.CurrentEpoch], Unlocked[r.CurrentEpoch])
+	*Unlocked = big.Add(*lastUnlocked, tmp)
+	*Locked = big.Sub(*totalMoney, *Unlocked)
+
+	//log.Println("the state total money is:",*r.CurrentEpochRecord.NetWorkTotalReward)
 	return nil
 }
 
@@ -602,34 +619,35 @@ func InitialPledgeForPower(qaPower abi.StoragePower, networkQAPower, baselinePow
 	additionalIPNum := big.Mul(lockTargetNum, pledgeShareNum)
 	additionalIPDenom := big.Mul(lockTargetDenom, pledgeShareDenom)
 	additionalIP := big.Div(additionalIPNum, additionalIPDenom)
-
+	//log.Println("the qaPower and networkQAPower and baselinePower is:",qaPower,networkQAPower,baselinePower)
+	//log.Println("the ipBase and additionalIP is:",ipBase,additionalIP)
 	return big.Add(ipBase, additionalIP)
 }
 
 func (st *State) paddingIPFSMain(IPFSMainEpochAddPower abi.StoragePower) {
-	st.Record.IPFSMainAddPower[st.Epoch] = IPFSMainEpochAddPower
+	st.Record.CurrentEpochRecord.IPFSMainAddPower = IPFSMainEpochAddPower
 	if st.Epoch <= 0 {
 		return
 	}
 
 	//IPFSMain当前epoch的预期奖励＝epoch-1的total power占比乘以当前epoch的奖励
 	//IPFSMain当前epoch的总奖励=前epoch-1个epoch的预期奖励之和
-	st.Record.IPFSMainTotalPower[st.Epoch] = big.Add(st.Record.IPFSMainTotalPower[st.Epoch-1], IPFSMainEpochAddPower)
-	expectedReward := big.Div(big.Mul(st.ThisEpochReward, st.Record.IPFSMainTotalPower[st.Epoch-1]), st.Record.TotalNetworkPower[st.Epoch-1])
-	st.Record.IPFSMainExpectedReward[st.Epoch] = expectedReward
+	st.Record.CurrentEpochRecord.IPFSMainTotalPower = big.Add(st.Record.LastEpochRecord.IPFSMainTotalPower, IPFSMainEpochAddPower)
+	expectedReward := big.Div(big.Mul(st.ThisEpochReward, st.Record.LastEpochRecord.IPFSMainTotalPower), st.Record.LastEpochRecord.TotalNetworkPower)
+	st.Record.CurrentEpochRecord.IPFSMainExpectedReward = expectedReward
 	st.Record.UpdateLockAndUnlockFunds(expectedReward, &RewardVestingSpec, IPFSMainRewardLock)
 
 	//将全网流通量设为0，计算所得即为IPBase。
 	//正式计算抵押时，使用的power为qaPower,此处假设全网皆为cc扇区，不受deal和duration影响，直接使用rawPower计算
 	qaPower := IPFSMainEpochAddPower
-	networkQAPower := st.Record.TotalNetworkPower[st.Epoch]
-	baselinePower := st.Record.BaseLinePower[st.Epoch]
-	networkTotalPledge := st.Record.NetWorkTotalDeposit[st.Epoch-1]
+	networkQAPower := st.Record.CurrentEpochRecord.TotalNetworkPower
+	baselinePower := st.Record.CurrentEpochRecord.BaseLinePower
+	networkTotalPledge := *st.Record.LastEpochRecord.NetWorkTotalDeposit
 	epochTargetReward := st.ThisEpochReward
-	networkCirculatingSupply := st.Record.NetworkCirculatingSupply[st.Epoch-1]
-	st.Record.IPFSMainIP[st.Epoch] = InitialPledgeForPower(qaPower, networkQAPower, baselinePower, networkTotalPledge, epochTargetReward, networkCirculatingSupply)
+	networkCirculatingSupply := st.Record.LastEpochRecord.NetworkCirculatingSupply
+	st.Record.CurrentEpochRecord.IPFSMainIP = InitialPledgeForPower(qaPower, networkQAPower, baselinePower, networkTotalPledge, epochTargetReward, networkCirculatingSupply)
 
-	st.Record.UpdateLockAndUnlockFunds(st.Record.IPFSMainIP[st.Epoch], &PledgeVestingSpec, IPFSMainDeposit)
+	st.Record.UpdateLockAndUnlockFunds(st.Record.CurrentEpochRecord.IPFSMainIP, &PledgeVestingSpec, IPFSMainDeposit)
 }
 
 func (st *State) Print() {
@@ -645,60 +663,61 @@ func (st *State) Print() {
 }
 
 func (r *Record) SaveToFile() error {
-/*	b, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return xerrors.Errorf("marshaling Record file: %w", err)
-	}*/
-	b ,err:= json.Marshal(r)
+	tmpRecordPoint := r.GetRecordPoint()
+	b, err := json.MarshalIndent(tmpRecordPoint, "", "  ")
 	if err != nil {
 		return xerrors.Errorf("marshaling Record file: %w", err)
 	}
+	/*	b, err := json.Marshal(tmpRecordPoint)
+		if err != nil {
+			return xerrors.Errorf("marshaling Record file: %w", err)
+		}*/
 	if err := ioutil.WriteFile("record.json", b, 0644); err != nil {
 		return xerrors.Errorf("persisting storage config (%s): %w", "record.json", err)
 	}
 	return nil
 }
 
-func (r *Record) GetEpochData(epoch abi.ChainEpoch) OneEpochRecord {
-	tmp := OneEpochRecord{
-		Epoch:                     r.Epoch[epoch],
-		BaseLineReward:            ToFile(r.BaseLineReward[epoch]),
-		SimpleReward:              ToFile(r.SimpleReward[epoch]),
-		EpochReward:               ToFile(r.EpochReward[epoch]),
-		InvestorAndProtoRelease:   ToFile(r.InvestorAndProtoRelease[epoch]),
-		NetworkCirculatingSupply:  ToFile(r.NetworkCirculatingSupply[epoch]),
-		NetWorkTotalReward:        ToFile(r.NetWorkTotalReward[epoch]),
-		NetWorkTotalDeposit:       ToFile(r.NetWorkTotalDeposit[epoch]),
-		NetWorkRewardLockFunds:    ToFile(r.NetWorkRewardLockFunds[epoch]),
-		NetWorkDepositLockFunds:   ToFile(r.NetWorkDepositLockFunds[epoch]),
-		NetWorkRewardUnLockFunds:  ToFile(r.NetWorkRewardUnLockFunds[epoch]),
-		NetWorkDepositUnLockFunds: ToFile(r.NetWorkDepositUnLockFunds[epoch]),
+func (r *Record) GetCurrentPrintEpochData() OneEpochRecordPrint {
+	tmp := OneEpochRecordPrint{
+		Epoch:                     r.CurrentEpochRecord.Epoch,
+		BaseLineReward:            ToFile(r.CurrentEpochRecord.BaseLineReward),
+		SimpleReward:              ToFile(r.CurrentEpochRecord.SimpleReward),
+		EpochReward:               ToFile(r.CurrentEpochRecord.EpochReward),
+		InvestorAndProtoRelease:   ToFile(r.CurrentEpochRecord.InvestorAndProtoRelease),
+		NetworkCirculatingSupply:  ToFile(r.CurrentEpochRecord.NetworkCirculatingSupply),
+		NetWorkTotalReward:        ToFile(*r.CurrentEpochRecord.NetWorkTotalReward),
+		NetWorkTotalDeposit:       ToFile(*r.CurrentEpochRecord.NetWorkTotalDeposit),
+		NetWorkRewardLockFunds:    ToFile(*r.CurrentEpochRecord.NetWorkRewardLockFunds),
+		NetWorkDepositLockFunds:   ToFile(*r.CurrentEpochRecord.NetWorkDepositLockFunds),
+		NetWorkRewardUnLockFunds:  ToFile(*r.CurrentEpochRecord.NetWorkRewardUnLockFunds),
+		NetWorkDepositUnLockFunds: ToFile(*r.CurrentEpochRecord.NetWorkDepositUnLockFunds),
 
-		CumSumRealized:         r.CumSumRealized        [epoch],
-		CumSumBaselinePower:    r.CumSumBaselinePower   [epoch],
-		EffectiveNetworkTime:   r.EffectiveNetworkTime  [epoch],
-		TotalNetworkPower:      r.TotalNetworkPower     [epoch],
-		BaseLinePower:          r.BaseLinePower         [epoch],
-		EffectiveBaselinePower: r.EffectiveBaselinePower[epoch],
+		CumSumRealized:         r.CurrentEpochRecord.CumSumRealized,
+		CumSumBaselinePower:    r.CurrentEpochRecord.CumSumBaselinePower,
+		EffectiveNetworkTime:   r.CurrentEpochRecord.EffectiveNetworkTime,
+		TotalNetworkPower:      r.CurrentEpochRecord.TotalNetworkPower,
+		BaseLinePower:          r.CurrentEpochRecord.BaseLinePower,
+		EffectiveBaselinePower: r.CurrentEpochRecord.EffectiveBaselinePower,
 
-		IPFSMainAddPower:       r.IPFSMainAddPower      [epoch],
-		IPFSMainTotalPower:     r.IPFSMainTotalPower    [epoch],
-		IPFSMainExpectedReward: ToFile(r.IPFSMainExpectedReward[epoch]),
-		IPFSMainTotalReward:    ToFile(r.IPFSMainTotalReward   [epoch]),
+		IPFSMainAddPower:       r.CurrentEpochRecord.IPFSMainAddPower,
+		IPFSMainTotalPower:     r.CurrentEpochRecord.IPFSMainTotalPower,
+		IPFSMainExpectedReward: ToFile(r.CurrentEpochRecord.IPFSMainExpectedReward),
+		IPFSMainTotalReward:    ToFile(*r.CurrentEpochRecord.IPFSMainTotalReward),
 
-		IPFSMainIP:                 ToFile(r.IPFSMainIP[epoch]),
-		IPFSMainTotalDeposit:       ToFile(r.IPFSMainTotalDeposit[epoch]),
-		IPFSMainRewardLockFunds:    ToFile(r.IPFSMainRewardLockFunds[epoch]),
-		IPFSMainDepositLockFunds:   ToFile(r.IPFSMainDepositLockFunds[epoch]),
-		IPFSMainRewardUnLockFunds:  ToFile(r.IPFSMainRewardUnLockFunds[epoch]),
-		IPFSMainDepositUnLockFunds: ToFile(r.IPFSMainDepositUnLockFunds[epoch]),
+		IPFSMainIP:                 ToFile(r.CurrentEpochRecord.IPFSMainIP),
+		IPFSMainTotalDeposit:       ToFile(*r.CurrentEpochRecord.IPFSMainTotalDeposit),
+		IPFSMainRewardLockFunds:    ToFile(*r.CurrentEpochRecord.IPFSMainRewardLockFunds),
+		IPFSMainDepositLockFunds:   ToFile(*r.CurrentEpochRecord.IPFSMainDepositLockFunds),
+		IPFSMainRewardUnLockFunds:  ToFile(*r.CurrentEpochRecord.IPFSMainRewardUnLockFunds),
+		IPFSMainDepositUnLockFunds: ToFile(*r.CurrentEpochRecord.IPFSMainDepositUnLockFunds),
 	}
 	return tmp
 }
 
-func (r *Record) PrintOneEpoch(epoch abi.ChainEpoch) error {
+func (r *Record) PrintCurrentEpoch() error {
 	log.Println("one Epoch economy model record")
-	tmp := r.GetEpochData(epoch)
+	tmp := r.GetCurrentPrintEpochData()
 	byte, err := json.Marshal(&tmp)
 	if err != nil {
 		return err
@@ -709,42 +728,51 @@ func (r *Record) PrintOneEpoch(epoch abi.ChainEpoch) error {
 	return nil
 }
 
-func (r *Record) PrintPointAccordingToPointNumber(pointNumber uint64) {
-	tmpRecord := NewPrintRecord(int64(pointNumber))
-	step := uint64(r.CurrentEpoch) / pointNumber
-	i:= uint64(1)
-	for j := 0; j < int(pointNumber); j++ {
-		tmpRecord.Epoch[j] = r.Epoch                     [i]
-		tmpRecord.BaseLineReward[j] = ToFile(r.BaseLineReward            [i])
-		tmpRecord.SimpleReward[j] = ToFile(r.SimpleReward              [i])
-		tmpRecord.EpochReward[j] = ToFile(r.EpochReward               [i])
-		tmpRecord.InvestorAndProtoRelease[j] = ToFile(r.InvestorAndProtoRelease   [i])
-		tmpRecord.NetworkCirculatingSupply[j] = ToFile(r.NetworkCirculatingSupply  [i])
-		tmpRecord.NetWorkTotalReward[j] = ToFile(r.NetWorkTotalReward        [i])
-		tmpRecord.NetWorkTotalDeposit[j] = ToFile(r.NetWorkTotalDeposit       [i])
-		tmpRecord.NetWorkRewardLockFunds[j] = ToFile(r.NetWorkRewardLockFunds    [i])
-		tmpRecord.NetWorkDepositLockFunds[j] = ToFile(r.NetWorkDepositLockFunds   [i])
-		tmpRecord.NetWorkRewardUnLockFunds[j] = ToFile(r.NetWorkRewardUnLockFunds  [i])
-		tmpRecord.NetWorkDepositUnLockFunds[j] = ToFile(r.NetWorkDepositUnLockFunds [i])
-		tmpRecord.CumSumRealized[j] = r.CumSumRealized            [i]
-		tmpRecord.CumSumBaselinePower[j] = r.CumSumBaselinePower       [i]
-		tmpRecord.EffectiveNetworkTime[j] = r.EffectiveNetworkTime      [i]
-		tmpRecord.TotalNetworkPower[j] = r.TotalNetworkPower         [i]
-		tmpRecord.BaseLinePower[j] = r.BaseLinePower             [i]
-		tmpRecord.EffectiveBaselinePower[j] = r.EffectiveBaselinePower    [i]
-		tmpRecord.IPFSMainAddPower[j] = r.IPFSMainAddPower          [i]
-		tmpRecord.IPFSMainTotalPower[j] = r.IPFSMainTotalPower        [i]
-		tmpRecord.IPFSMainExpectedReward[j] = ToFile(r.IPFSMainExpectedReward    [i])
-		tmpRecord.IPFSMainTotalReward[j] = ToFile(r.IPFSMainTotalReward       [i])
-		tmpRecord.IPFSMainIP[j] = ToFile(r.IPFSMainIP                [i])
-		tmpRecord.IPFSMainTotalDeposit[j] = ToFile(r.IPFSMainTotalDeposit      [i])
-		tmpRecord.IPFSMainRewardLockFunds[j] = ToFile(r.IPFSMainRewardLockFunds   [i])
-		tmpRecord.IPFSMainDepositLockFunds[j] = ToFile(r.IPFSMainDepositLockFunds  [i])
-		tmpRecord.IPFSMainRewardUnLockFunds[j] = ToFile(r.IPFSMainRewardUnLockFunds [i])
-		tmpRecord.IPFSMainDepositUnLockFunds[j] = ToFile(r.IPFSMainDepositUnLockFunds[i])
-		i+=step
-	}
+func (r *Record) GetRecordPoint() *PrintRecord {
+	tmpRecord := NewPrintRecord(r.RecordNumber)
+	i := 0
+	tmpRecord.CirculateEnoughEpoch = r.CirculateEnoughEpoch
+	for j := 0; j < int(r.RecordNumber); j++ {
+		tmpRecord.Epoch[j] = r.NeedRecordEpoch[i].Epoch
 
+		tmpRecord.BaseLineReward[j] = ToFile(r.NeedRecordEpoch[i].BaseLineReward)
+		tmpRecord.SimpleReward[j] = ToFile(r.NeedRecordEpoch[i].SimpleReward)
+		tmpRecord.EpochReward[j] = ToFile(r.NeedRecordEpoch[i].EpochReward)
+		tmpRecord.InvestorAndProtoRelease[j] = ToFile(r.NeedRecordEpoch[i].InvestorAndProtoRelease)
+		tmpRecord.NetworkCirculatingSupply[j] = ToFile(r.NeedRecordEpoch[i].NetworkCirculatingSupply)
+		tmpRecord.NetWorkTotalReward[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkTotalReward)
+		tmpRecord.NetWorkTotalDeposit[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkTotalDeposit)
+		tmpRecord.NetWorkRewardLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkRewardLockFunds)
+		tmpRecord.NetWorkDepositLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkDepositLockFunds)
+		tmpRecord.NetWorkRewardUnLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkRewardUnLockFunds)
+		tmpRecord.NetWorkDepositUnLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].NetWorkDepositUnLockFunds)
+
+		tmpRecord.CumSumRealized[j] = r.NeedRecordEpoch[i].CumSumRealized
+		tmpRecord.CumSumBaselinePower[j] = r.NeedRecordEpoch[i].CumSumBaselinePower
+		tmpRecord.EffectiveNetworkTime[j] = r.NeedRecordEpoch[i].EffectiveNetworkTime
+		tmpRecord.TotalNetworkPower[j] = r.NeedRecordEpoch[i].TotalNetworkPower
+		tmpRecord.BaseLinePower[j] = r.NeedRecordEpoch[i].BaseLinePower
+		tmpRecord.EffectiveBaselinePower[j] = r.NeedRecordEpoch[i].EffectiveBaselinePower
+		tmpRecord.IPFSMainAddPower[j] = r.NeedRecordEpoch[i].IPFSMainAddPower
+		tmpRecord.IPFSMainTotalPower[j] = r.NeedRecordEpoch[i].IPFSMainTotalPower
+
+		tmpRecord.IPFSMainExpectedReward[j] = ToFile(r.NeedRecordEpoch[i].IPFSMainExpectedReward)
+		tmpRecord.IPFSMainTotalReward[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainTotalReward)
+		tmpRecord.IPFSMainIP[j] = ToFile(r.NeedRecordEpoch[i].IPFSMainIP)
+		tmpRecord.IPFSMainTotalDeposit[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainTotalDeposit)
+		tmpRecord.IPFSMainRewardLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainRewardLockFunds)
+		tmpRecord.IPFSMainDepositLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainDepositLockFunds)
+		tmpRecord.IPFSMainRewardUnLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainRewardUnLockFunds)
+		tmpRecord.IPFSMainDepositUnLockFunds[j] = ToFile(*r.NeedRecordEpoch[i].IPFSMainDepositUnLockFunds)
+		i++
+	}
+	return tmpRecord
+}
+
+func (r *Record) PrintRecordPoint() {
+	tmpRecord := r.GetRecordPoint()
+	log.Print("the CirculateEnoughEpoch is:")
+	log.Println(r.CirculateEnoughEpoch)
 	log.Print("the Epoch is:")
 	log.Println(tmpRecord.Epoch)
 	log.Print("the BaseLineReward is:")
@@ -808,4 +836,31 @@ func ToFile(value abi.TokenAmount) float64 {
 	tmpValue.SetFrac(value.Int, big2.NewInt(1e18))
 	f, _ := tmpValue.Float64()
 	return f
+}
+
+func SimulateExecuteEconomyModel(epoch, startEpoch abi.ChainEpoch, pointNumber int, netWorkOneDayAddPower, IPFSMainOneDayAddPower abi.StoragePower) {
+	step := (epoch - startEpoch) / abi.ChainEpoch(pointNumber)
+	state := State{
+		CumsumBaseline:         big.Zero(),
+		CumsumRealized:         big.Zero(),
+		EffectiveNetworkTime:   0,
+		EffectiveBaselinePower: BaselineInitialValue,
+		ThisEpochReward:        big.Zero(),
+		ThisEpochBaselinePower: InitBaselinePower(),
+		Epoch:                  -1,
+		Record:                 NewRewardRecord(abi.ChainEpoch(startEpoch), abi.ChainEpoch(step), int64(pointNumber)),
+	}
+	//genesisPower 720T
+	genesisPower := big.Lsh(big.NewInt(720), 40)
+	state.updateToNextEpochWithRewardForTest(big.NewInt(0), big.NewInt(0), genesisPower)
+
+	TotalOneEpochAdd := big.Div(netWorkOneDayAddPower,big.NewInt(builtin.EpochsInDay))
+	IPFSMainEpochAddPower :=  big.Div(IPFSMainOneDayAddPower,big.NewInt(builtin.EpochsInDay))
+	currentEpochRealizedPower := genesisPower
+	i := abi.ChainEpoch(0)
+	for i = 0; i < epoch; i++ {
+		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
+		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd, IPFSMainEpochAddPower, currentEpochRealizedPower)
+	}
+	state.Record.SaveToFile()
 }

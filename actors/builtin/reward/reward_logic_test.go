@@ -205,8 +205,11 @@ func Test_BaseLinePower(t *testing.T) {
 
 func Test_EconomyModel(t *testing.T) {
 	//epoch := builtin.EpochsInDay * 365
-	epoch := builtin.EpochsInDay*100
-	//epoch := 100
+	//epoch := builtin.EpochsInDay*100
+	epoch := 10
+	pointNumber  := 4
+	startEpoch := 1
+	step := (epoch-startEpoch)/pointNumber
 	state := State{
 		CumsumBaseline:         big.Zero(),
 		CumsumRealized:         big.Zero(),
@@ -215,14 +218,14 @@ func Test_EconomyModel(t *testing.T) {
 		ThisEpochReward:        big.Zero(),
 		ThisEpochBaselinePower: InitBaselinePower(),
 		Epoch:                  -1,
-		Record:                 NewRewardRecord(int64(epoch + 1)),
+		Record:                 NewRewardRecord(abi.ChainEpoch(startEpoch),abi.ChainEpoch(step),int64(pointNumber)),
 	}
 	//genesisPower 720T
 	genesisPower := big.Lsh(big.NewInt(720), 40)
 	//state.updateToNextEpoch(genesisPower)
 	log.Print(state)
 	//state.Print()
-	state.updateToNextEpochWithRewardForTest(big.NewInt(0), genesisPower)
+	state.updateToNextEpochWithRewardForTest(big.NewInt(0),big.NewInt(0), genesisPower)
 	log.Print(state)
 	//network add 10 PB one day
 	TotalOneDayAdd := big.Lsh(big.NewInt(10), 50)
@@ -239,11 +242,11 @@ func Test_EconomyModel(t *testing.T) {
 	i := 0
 	for i = 0; i < epoch; i++ {
 		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
-		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd, currentEpochRealizedPower)
-		state.paddingIPFSMain(IPFSMainEpochAddPower)
+		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd,IPFSMainEpochAddPower ,currentEpochRealizedPower)
+		state.PrintCurrentEpoch()
 	}
 	log.Println("the point is:", )
-	state.Record.PrintPointAccordingToPointNumber(10)
+	state.Record.PrintRecordPoint()
 	state.Record.SaveToFile()
 	//pointNumber := 10
 }
