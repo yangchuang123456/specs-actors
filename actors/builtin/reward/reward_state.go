@@ -19,6 +19,7 @@ import (
 	"io/ioutil"
 	"log"
 	big2 "math/big"
+	"runtime"
 )
 
 // A quantity of space * time (in byte-epochs) representing power committed to the network for some duration.
@@ -367,6 +368,10 @@ func (st *State) updateToNextEpochWithRewardForTest(totalAdd, ipfsMainAdd, currR
 	if st.CurrentEpoch == st.CurrentNeedRecordEpoch {
 		st.NeedRecordEpoch = append(st.NeedRecordEpoch, st.CurrentEpochRecord)
 		st.CurrentNeedRecordEpoch += st.RecordStep
+	}
+
+	if st.CurrentEpoch%(60/25) == 0{
+		runtime.GC()
 	}
 }
 
