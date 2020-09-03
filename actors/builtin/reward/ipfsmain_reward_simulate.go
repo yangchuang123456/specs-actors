@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/filecoin-project/specs-actors/actors/abi"
 	"github.com/filecoin-project/specs-actors/actors/abi/big"
 	"github.com/filecoin-project/specs-actors/actors/builtin"
@@ -22,7 +21,7 @@ import (
 	"io/ioutil"
 	"log"
 	big2 "math/big"
-	"runtime"
+	"net/http"
 )
 
 type OneEpochRecord struct {
@@ -95,6 +94,7 @@ type OneEpochRecordPrint struct {
 
 //for test
 type Record struct {
+	Stat                   *State
 	RecordStartEpoch       abi.ChainEpoch
 	RecordStep             abi.ChainEpoch
 	RecordNumber           int64
@@ -291,7 +291,7 @@ func (st *State) updateToNextEpochWithRewardForTest(totalAdd, ipfsMainAdd, currR
 	}
 
 	if st.CurrentEpoch%(60/25) == 0 {
-		runtime.GC()
+		//runtime.GC()
 	}
 }
 
@@ -343,7 +343,51 @@ func quantizeUp(e abi.ChainEpoch, unit abi.ChainEpoch, offsetSeed abi.ChainEpoch
 
 }
 
-func AddLockedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch, vestingSum abi.TokenAmount, spec *VestSpec) error {
+func LoadVestingFunds(store adt.Store, vestingFunds *cid.Cid) (*VestingFunds, error) {
+	var funds VestingFunds
+	if err := store.Get(store.Context(), *vestingFunds, &funds); err != nil {
+		return nil, xerrors.Errorf("failed to load vesting funds (%s): %w", *vestingFunds, err)
+	}
+
+	return &funds, nil
+}
+
+func SaveVestingFunds(store adt.Store, funds *VestingFunds, fCid *cid.Cid) error {
+	c, err := store.Put(store.Context(), funds)
+	if err != nil {
+		return err
+	}
+	*fCid = c
+	return nil
+}
+
+// AddLockedFunds first vests and unlocks the vested funds AND then locks the given funds in the vesting table.
+func AddLockedFunds(store adt.Store, fCid *cid.Cid, currEpoch abi.ChainEpoch, LockedFunds *abi.TokenAmount, vestingSum abi.TokenAmount, spec *VestSpec) (vested abi.TokenAmount, err error) {
+	util.AssertMsg(vestingSum.GreaterThanEqual(big.Zero()), "negative vesting sum %s", vestingSum)
+
+	vestingFunds, err := LoadVestingFunds(store, fCid)
+	if err != nil {
+		return big.Zero(), xerrors.Errorf("failed to load vesting funds: %w", err)
+	}
+
+	// unlock vested funds first
+	amountUnlocked := vestingFunds.unlockVestedFunds(currEpoch)
+	*LockedFunds = big.Sub(*LockedFunds, amountUnlocked)
+	util.Assert(LockedFunds.GreaterThanEqual(big.Zero()))
+
+	// add locked funds now
+	vestingFunds.addLockedFunds(currEpoch, vestingSum, 0, spec)
+	*LockedFunds = big.Add(*LockedFunds, vestingSum)
+
+	// save the updated vesting table state
+	if err := SaveVestingFunds(store, vestingFunds, fCid); err != nil {
+		return big.Zero(), xerrors.Errorf("failed to save vesting funds: %w", err)
+	}
+
+	return amountUnlocked, nil
+}
+
+/*func AddLockedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch, vestingSum abi.TokenAmount, spec *VestSpec) error {
 	util.AssertMsg(vestingSum.GreaterThanEqual(big.Zero()), "negative vesting sum %s", vestingSum)
 	vestingFunds, err := adt.AsArray(store, *root)
 	if err != nil {
@@ -389,9 +433,32 @@ func AddLockedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch, ve
 		return err
 	}
 	return nil
+}*/
+
+func UnlockVestedFunds(store adt.Store, fCid *cid.Cid, LockedFunds *abi.TokenAmount, currEpoch abi.ChainEpoch) (abi.TokenAmount, error) {
+	// Short-circuit to avoid loading vesting funds if we don't have any.
+	if LockedFunds.IsZero() {
+		return big.Zero(), nil
+	}
+
+	vestingFunds, err := LoadVestingFunds(store, fCid)
+	if err != nil {
+		return big.Zero(), xerrors.Errorf("failed to load vesting funds: %w", err)
+	}
+
+	amountUnlocked := vestingFunds.unlockVestedFunds(currEpoch)
+	*LockedFunds = big.Sub(*LockedFunds, amountUnlocked)
+	util.Assert(LockedFunds.GreaterThanEqual(big.Zero()))
+
+	err = SaveVestingFunds(store, vestingFunds, fCid)
+	if err != nil {
+		return big.Zero(), xerrors.Errorf("failed to save vesing funds: %w", err)
+	}
+
+	return amountUnlocked, nil
 }
 
-func UnlockVestedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch) (abi.TokenAmount, error) {
+/*func UnlockVestedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch) (abi.TokenAmount, error) {
 	vestingFunds, err := adt.AsArray(store, *root)
 	if err != nil {
 		return big.Zero(), err
@@ -428,7 +495,7 @@ func UnlockVestedFunds(store adt.Store, root *cid.Cid, currEpoch abi.ChainEpoch)
 	}
 
 	return amountUnlocked, nil
-}
+}*/
 
 func (r *Record) UpdateCirculatingSupply() {
 	//更新投资人和协议实验室
@@ -493,7 +560,7 @@ func (r *Record) UpdateLockAndUnlockFunds(vestingSum abi.TokenAmount, spec *Vest
 
 	//log.Println("the lockType,currentEpoch,vestingSum and lastTotalMoney is",lockType,r.CurrentEpoch,vestingSum,*lastTotalMoney)
 
-	err := AddLockedFunds(r.Store, root, r.CurrentEpoch, vestingSum, spec)
+	_, err := AddLockedFunds(r.Store, root, r.CurrentEpoch, Locked, vestingSum, spec)
 	if err != nil {
 		return err
 	}
@@ -501,12 +568,12 @@ func (r *Record) UpdateLockAndUnlockFunds(vestingSum abi.TokenAmount, spec *Vest
 	*totalMoney = big.Add(*lastTotalMoney, vestingSum)
 	//log.Println("current totalMoney is:",*totalMoney)
 
-	tmp, err := UnlockVestedFunds(r.Store, root, r.CurrentEpoch)
+	_, err = UnlockVestedFunds(r.Store, root, Locked, r.CurrentEpoch)
 	if err != nil {
 		return err
 	}
-	*Unlocked = big.Add(*lastUnlocked, tmp)
-	*Locked = big.Sub(*totalMoney, *Unlocked)
+
+	*Unlocked = big.Sub(*totalMoney, *Locked)
 
 	//log.Println("the state total money is:",*r.CurrentEpochRecord.NetWorkTotalReward)
 	return nil
@@ -564,7 +631,7 @@ func (st *State) paddingIPFSMain(IPFSMainEpochAddPower abi.StoragePower) {
 	qaPower := IPFSMainEpochAddPower
 	baselinePower := st.Record.CurrentEpochRecord.BaseLinePower
 	networkCirculatingSupply := st.Record.LastEpochRecord.NetworkCirculatingSupply
-	st.Record.CurrentEpochRecord.IPFSMainIP = InitialPledgeForPower(qaPower, baselinePower,st.ThisEpochRewardSmoothed,st.ThisEpochQAPowerSmoothed, networkCirculatingSupply)
+	st.Record.CurrentEpochRecord.IPFSMainIP = InitialPledgeForPower(qaPower, baselinePower, st.ThisEpochRewardSmoothed, st.ThisEpochQAPowerSmoothed, networkCirculatingSupply)
 
 	st.Record.UpdateLockAndUnlockFunds(st.Record.CurrentEpochRecord.IPFSMainIP, &PledgeVestingSpec, IPFSMainDeposit)
 }
@@ -773,6 +840,10 @@ func SimulateExecuteEconomyModel(epoch, startEpoch abi.ChainEpoch, pointNumber i
 		TotalMined:              big.Zero(),
 		Record:                  NewRewardRecord(abi.ChainEpoch(startEpoch), abi.ChainEpoch(step), int64(pointNumber)),
 	}
+
+	go func() {
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
 
 	//genesisPower 720T
 	genesisPower := big.Lsh(big.NewInt(720), 40)

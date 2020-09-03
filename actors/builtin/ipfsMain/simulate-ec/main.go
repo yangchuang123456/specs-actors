@@ -7,6 +7,7 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/builtin/reward"
 	"github.com/urfave/cli"
 	"os"
+ 	_ "net/http/pprof"
 )
 
 var (
