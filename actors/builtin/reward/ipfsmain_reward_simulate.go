@@ -9,12 +9,13 @@ import (
 	"github.com/filecoin-project/specs-actors/actors/builtin"
 	log2 "github.com/filecoin-project/specs-actors/actors/builtin/log"
 	"github.com/filecoin-project/specs-actors/actors/builtin/power"
+	"github.com/filecoin-project/specs-actors/actors/runtime"
 	"github.com/filecoin-project/specs-actors/actors/util"
 	"github.com/filecoin-project/specs-actors/actors/util/adt"
 	"github.com/filecoin-project/specs-actors/actors/util/math"
 	"github.com/filecoin-project/specs-actors/actors/util/smoothing"
-	"github.com/filecoin-project/specs-actors/support/ipld"
 	"github.com/ipfs/go-cid"
+	mh "github.com/multiformats/go-multihash"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/xerrors"
@@ -92,6 +93,30 @@ type OneEpochRecordPrint struct {
 	IPFSMainDepositUnLockFunds float64
 }
 
+type rtStore struct {
+	store   *Store
+	context context.Context
+}
+
+func (r rtStore) Context() context.Context {
+	return r.context
+}
+
+func (r rtStore) Get(_ context.Context, c cid.Cid, out interface{}) error {
+	// The Go context is (un/fortunately?) dropped here.
+	// See https://github.com/filecoin-project/specs-actors/issues/140
+	if !r.store.Get(c, out.(runtime.CBORUnmarshaler)) {
+		util.AssertNoError(errors.New("out not implement CBORUnmarshaler interface"))
+	}
+	return nil
+}
+
+func (r rtStore) Put(_ context.Context, v interface{}) (cid.Cid, error) {
+	// The Go context is (un/fortunately?) dropped here.
+	// See https://github.com/filecoin-project/specs-actors/issues/140
+	return r.store.Put(v.(runtime.CBORMarshaler)), nil
+}
+
 //for test
 type Record struct {
 	Stat                   *State
@@ -100,7 +125,7 @@ type Record struct {
 	RecordNumber           int64
 	CurrentNeedRecordEpoch abi.ChainEpoch
 	CurrentEpoch           abi.ChainEpoch
-	Store                  adt.Store
+	Store                  rtStore
 
 	CirculateEnoughEpoch abi.ChainEpoch
 
@@ -186,23 +211,79 @@ func NewPrintRecord(epoch int64) *PrintRecord {
 
 var CirculateNotEnough = abi.ChainEpoch(-2) //-2标识未到达
 
+var cidBuilder = cid.V1Builder{
+	Codec:    cid.DagCBOR,
+	MhType:   mh.SHA2_256,
+	MhLength: 0, // default
+}
+
+type Store struct {
+	store map[cid.Cid][]byte
+	i     byte
+}
+
+func NewStore() *Store {
+	return &Store{
+		store: make(map[cid.Cid][]byte),
+	}
+}
+
+func (s *Store) Get(c cid.Cid, o runtime.CBORUnmarshaler) bool {
+	// requireInCall omitted because it makes using this mock runtime as a store awkward.
+	data, found := s.store[c]
+	if found {
+		err := o.UnmarshalCBOR(bytes.NewReader(data))
+		util.AssertNoError(err)
+		//remove after delete to increase memory use. so must save after get
+		delete(s.store, c)
+	}
+	return found
+}
+func (s *Store) SetKeyIndex(i byte) {
+	s.i = i
+}
+
+func (s *Store) Put(o runtime.CBORMarshaler) cid.Cid {
+	// requireInCall omitted because it makes using this mock runtime as a store awkward.
+	r := bytes.Buffer{}
+	err := o.MarshalCBOR(&r)
+	util.AssertNoError(err)
+
+	data := r.Bytes()
+	tmpData := append(data, s.i)
+	key, err := cidBuilder.Sum(tmpData)
+	util.AssertNoError(err)
+
+	s.store[key] = data
+	return key
+}
+
 func NewRewardRecord(recordStartEpoch, stepEpoch abi.ChainEpoch, RecordNumber int64) *Record {
-	store := ipld.NewADTStore(context.Background())
-	iPFSMainRewardLockFund, err := adt.MakeEmptyArray(store).Root()
-	if err != nil {
-		panic("NewRewardRecord MakeEmptyArray iPFSMainRewardLockFund error")
-	}
-	iPFSMainDepositLockFund, err := adt.MakeEmptyArray(store).Root()
-	if err != nil {
-		panic("NewRewardRecord MakeEmptyArray iPFSMainDepositLockFund error")
-	}
-	netWorkRewardLockFund, err := adt.MakeEmptyArray(store).Root()
-	if err != nil {
-		panic("NewRewardRecord MakeEmptyArray netWorkRewardLockFund error")
-	}
-	netWorkDepositLockFund, err := adt.MakeEmptyArray(store).Root()
-	if err != nil {
-		panic("NewRewardRecord MakeEmptyArray netWorkDepositLockFund error")
+	store := NewStore()
+
+	emptyVestingFunds := ConstructVestingFunds()
+	iPFSMainRewardLockFund := store.Put(emptyVestingFunds)
+	//log.Println("the iPFSMainRewardLockFund is", iPFSMainRewardLockFund)
+
+	emptyVestingFunds = ConstructVestingFunds()
+	store.SetKeyIndex(byte(1))
+	iPFSMainDepositLockFund := store.Put(emptyVestingFunds)
+
+	//log.Println("the iPFSMainDepositLockFund is", iPFSMainDepositLockFund)
+
+	emptyVestingFunds = ConstructVestingFunds()
+	store.SetKeyIndex(byte(2))
+	netWorkRewardLockFund := store.Put(emptyVestingFunds)
+	//log.Println("the netWorkRewardLockFund is", netWorkRewardLockFund)
+
+	emptyVestingFunds = ConstructVestingFunds()
+	store.SetKeyIndex(byte(3))
+	netWorkDepositLockFund := store.Put(emptyVestingFunds)
+	//log.Println("the netWorkDepositLockFund is", netWorkDepositLockFund)
+
+	rtStore := rtStore{
+		store:   store,
+		context: context.Background(),
 	}
 	return &Record{
 		RecordStartEpoch:        recordStartEpoch,
@@ -210,7 +291,7 @@ func NewRewardRecord(recordStartEpoch, stepEpoch abi.ChainEpoch, RecordNumber in
 		RecordNumber:            RecordNumber,
 		CurrentNeedRecordEpoch:  recordStartEpoch,
 		CirculateEnoughEpoch:    CirculateNotEnough,
-		Store:                   store,
+		Store:                   rtStore,
 		CurrentEpoch:            abi.ChainEpoch(0),
 		IPFSMainRewardLockFund:  &iPFSMainRewardLockFund,
 		IPFSMainDepositLockFund: &iPFSMainDepositLockFund,
@@ -499,14 +580,14 @@ func UnlockVestedFunds(store adt.Store, fCid *cid.Cid, LockedFunds *abi.TokenAmo
 
 func (r *Record) UpdateCirculatingSupply() {
 	//更新投资人和协议实验室
-	addValue := big.NewInt(0)
-	if r.CurrentEpoch > 0 && r.CurrentEpoch <= 183*builtin.EpochsInDay {
-		addValue = big.Div(big.Mul(big.NewInt(6938822776), big.NewInt(1e14)), big.NewInt(builtin.EpochsInDay))
-		//addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
-	} else if r.CurrentEpoch > 183*builtin.EpochsInDay && r.CurrentEpoch <= 365*builtin.EpochsInDay {
-		//addValue = big.Div(big.Mul(big.NewInt(4745936072), big.NewInt(1e14)),big.NewInt(builtin.EpochsInDay))
-		addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
-	}
+	addValue := big.Div(big.Mul(big.NewInt(319634703196347), big.NewInt(1e9)), big.NewInt(builtin.EpochsInDay))
+	/*	if r.CurrentEpoch > 0 && r.CurrentEpoch <= 183*builtin.EpochsInDay {
+			addValue = big.Div(big.Mul(big.NewInt(6938822776), big.NewInt(1e14)), big.NewInt(builtin.EpochsInDay))
+			//addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
+		} else if r.CurrentEpoch > 183*builtin.EpochsInDay && r.CurrentEpoch <= 365*builtin.EpochsInDay {
+			//addValue = big.Div(big.Mul(big.NewInt(4745936072), big.NewInt(1e14)),big.NewInt(builtin.EpochsInDay))
+			addValue = big.Mul(big.NewInt(6938822776), big.NewInt(1e14))
+		}*/
 
 	r.CurrentEpochRecord.InvestorAndProtoRelease = big.Add(r.LastEpochRecord.InvestorAndProtoRelease, addValue)
 
@@ -524,33 +605,33 @@ func (r *Record) UpdateCirculatingSupply() {
 
 func (r *Record) UpdateLockAndUnlockFunds(vestingSum abi.TokenAmount, spec *VestSpec, lockType LockType) error {
 	var root *cid.Cid
-	var totalMoney, Locked, Unlocked, lastUnlocked, lastTotalMoney *abi.TokenAmount
+	var totalMoney, Locked, Unlocked, lastLocked, lastTotalMoney *abi.TokenAmount
 	switch lockType {
 	case NetworkRewardLock:
 		root = r.NetWorkRewardLockFund
 		lastTotalMoney = r.LastEpochRecord.NetWorkTotalReward
-		lastUnlocked = r.LastEpochRecord.NetWorkRewardUnLockFunds
+		lastLocked = r.LastEpochRecord.NetWorkRewardLockFunds
 		totalMoney = r.CurrentEpochRecord.NetWorkTotalReward
 		Locked = r.CurrentEpochRecord.NetWorkRewardLockFunds
 		Unlocked = r.CurrentEpochRecord.NetWorkRewardUnLockFunds
 	case NetWorkDeposit:
 		root = r.NetWorkDepositLockFund
 		lastTotalMoney = r.LastEpochRecord.NetWorkTotalDeposit
-		lastUnlocked = r.LastEpochRecord.NetWorkDepositUnLockFunds
+		lastLocked = r.LastEpochRecord.NetWorkDepositLockFunds
 		totalMoney = r.CurrentEpochRecord.NetWorkTotalDeposit
 		Locked = r.CurrentEpochRecord.NetWorkDepositLockFunds
 		Unlocked = r.CurrentEpochRecord.NetWorkDepositUnLockFunds
 	case IPFSMainRewardLock:
 		root = r.IPFSMainRewardLockFund
 		lastTotalMoney = r.LastEpochRecord.IPFSMainTotalReward
-		lastUnlocked = r.LastEpochRecord.IPFSMainRewardUnLockFunds
+		lastLocked = r.LastEpochRecord.IPFSMainRewardLockFunds
 		totalMoney = r.CurrentEpochRecord.IPFSMainTotalReward
 		Locked = r.CurrentEpochRecord.IPFSMainRewardLockFunds
 		Unlocked = r.CurrentEpochRecord.IPFSMainRewardUnLockFunds
 	case IPFSMainDeposit:
 		root = r.IPFSMainDepositLockFund
 		lastTotalMoney = r.LastEpochRecord.IPFSMainTotalDeposit
-		lastUnlocked = r.LastEpochRecord.IPFSMainDepositUnLockFunds
+		lastLocked = r.LastEpochRecord.IPFSMainDepositLockFunds
 		totalMoney = r.CurrentEpochRecord.IPFSMainTotalDeposit
 		Locked = r.CurrentEpochRecord.IPFSMainDepositLockFunds
 		Unlocked = r.CurrentEpochRecord.IPFSMainDepositUnLockFunds
@@ -558,24 +639,26 @@ func (r *Record) UpdateLockAndUnlockFunds(vestingSum abi.TokenAmount, spec *Vest
 		return errors.New("lockType error")
 	}
 
-	//log.Println("the lockType,currentEpoch,vestingSum and lastTotalMoney is",lockType,r.CurrentEpoch,vestingSum,*lastTotalMoney)
-
+	*Locked = *lastLocked
+	//log.Println("the lockType,currentEpoch,vestingSum and lastTotalMoney is", lockType, r.CurrentEpoch, vestingSum, *lastTotalMoney, *Locked)
 	_, err := AddLockedFunds(r.Store, root, r.CurrentEpoch, Locked, vestingSum, spec)
 	if err != nil {
+		log.Println("UpdateLockAndUnlockFunds AddLockedFunds error", err)
 		return err
 	}
-	//log.Println("last totalMoney is:",*lastTotalMoney)
+	//log.Println("last totalMoney is:", *lastTotalMoney)
 	*totalMoney = big.Add(*lastTotalMoney, vestingSum)
-	//log.Println("current totalMoney is:",*totalMoney)
+	//log.Println("current totalMoney is:", *totalMoney)
 
 	_, err = UnlockVestedFunds(r.Store, root, Locked, r.CurrentEpoch)
 	if err != nil {
+		log.Println("UpdateLockAndUnlockFunds UnlockVestedFunds error", err)
 		return err
 	}
 
 	*Unlocked = big.Sub(*totalMoney, *Locked)
 
-	//log.Println("the state total money is:",*r.CurrentEpochRecord.NetWorkTotalReward)
+	//log.Println("the state total money is:", *r.CurrentEpochRecord.NetWorkTotalReward)
 	return nil
 }
 
@@ -614,6 +697,7 @@ func InitialPledgeForPower(qaPower, baselinePower abi.StoragePower, rewardEstima
 }
 
 func (st *State) paddingIPFSMain(IPFSMainEpochAddPower abi.StoragePower) {
+	//log.Println("paddingIPFSMain the IPFSMainEpochAddPower is:", IPFSMainEpochAddPower)
 	st.Record.CurrentEpochRecord.IPFSMainAddPower = IPFSMainEpochAddPower
 	if st.Epoch <= 0 {
 		return
@@ -861,6 +945,11 @@ func SimulateExecuteEconomyModel(epoch, startEpoch abi.ChainEpoch, pointNumber i
 		currentEpochRealizedPower = big.Add(TotalOneEpochAdd, currentEpochRealizedPower)
 		state.updateToNextEpochWithRewardForTest(TotalOneEpochAdd, IPFSMainEpochAddPower, currentEpochRealizedPower)
 		state.updateSmoothedEstimates(state.Epoch - prev)
+
+/*		for k, _ := range state.Store.store.store {
+			log.Println("the store key is:", k)
+		}*/
+		//state.Record.PrintCurrentEpoch()
 	}
 	state.Record.SaveToFile()
 }
