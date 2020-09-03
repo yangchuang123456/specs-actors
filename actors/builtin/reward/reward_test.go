@@ -2,6 +2,7 @@ package reward_test
 
 import (
 	"context"
+	"log"
 	"testing"
 
 	address "github.com/filecoin-project/go-address"
@@ -303,3 +304,41 @@ func getState(rt *mock.Runtime) *reward.State {
 	rt.GetState(&st)
 	return &st
 }
+
+func Test_reward(t *testing.T) {
+	actor := rewardHarness{reward.Actor{}, t}
+	rt := mock.NewBuilder(context.Background(), builtin.RewardActorAddr).
+		WithCaller(builtin.SystemActorAddr, builtin.SystemActorCodeID).
+		Build(t)
+	startRealizedPower := abi.NewStoragePower(0)
+	actor.constructAndVerify(rt, &startRealizedPower)
+	st := getState(rt)
+	st.Print()
+
+	rt.SetCaller(builtin.StoragePowerActorAddr, builtin.StoragePowerActorCodeID)
+	rt.ExpectValidateCallerAny()
+	rt.ExpectValidateCallerAddr(builtin.StoragePowerActorAddr)
+	currRealizedPower := reward.BaselineInitialValue
+	log.Println("the currRealizedPower is:", currRealizedPower)
+	//	epochAddPower = big.NewInt(0)
+	for i := 1; i <= 100; i++ {
+		preRealizedPower := currRealizedPower
+		currRealizedPower = reward.BaselinePowerFromPrev(currRealizedPower)
+		addPower := big.Sub(currRealizedPower, preRealizedPower)
+		rt.Call(actor.UpdateNetworkKPI, &addPower)
+		//currRealizedPower=big.Add(currRealizedPower,epochAddPower)
+		st.Print()
+		/*		if i>=50{
+				currRealizedPower = big.NewInt(0)
+			}*/
+		currRealizedPower = reward.BaselinePowerFromPrev(currRealizedPower)
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+		log.Println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+	}
+}
+
+
+
+

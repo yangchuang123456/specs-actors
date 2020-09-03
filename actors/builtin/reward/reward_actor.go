@@ -2,6 +2,8 @@ package reward
 
 import (
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/specs-actors/actors/builtin/log"
+	"go.uber.org/zap"
 
 	"github.com/filecoin-project/specs-actors/actors/util/smoothing"
 
@@ -148,7 +150,8 @@ func (a Actor) ThisEpochReward(rt vmr.Runtime, _ *adt.EmptyValue) *ThisEpochRewa
 // This is only invoked for non-empty tipsets, but catches up any number of null
 // epochs to compute the next epoch reward.
 func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePower) *adt.EmptyValue {
-	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
+	log.Log.Info("UpdateNetworkKPI",zap.Any("epoch",rt.CurrEpoch()),zap.Any("currRealizedPower",*currRealizedPower))
+//	rt.ValidateImmediateCallerIs(builtin.StoragePowerActorAddr)
 	if currRealizedPower == nil {
 		rt.Abortf(exitcode.ErrIllegalArgument, "arugment should not be nil")
 	}
@@ -158,14 +161,20 @@ func (a Actor) UpdateNetworkKPI(rt vmr.Runtime, currRealizedPower *abi.StoragePo
 		prev := st.Epoch
 		// if there were null runs catch up the computation until
 		// st.Epoch == rt.CurrEpoch()
+		log.Log.Info("UpdateNetworkKPI",zap.Any("stEpoch",st.Epoch))
+		st.Print()
 		for st.Epoch < rt.CurrEpoch() {
 			// Update to next epoch to process null rounds
 			st.updateToNextEpoch(*currRealizedPower)
 		}
 
 		st.updateToNextEpochWithReward(*currRealizedPower)
+		log.Log.Info("the status after UpdateNetworkKPI")
+		st.Print()
+		log.Log.Info("~~~~~~~~~~~~~~~~~~~~~")
 		// only update smoothed estimates after updating reward and epoch
 		st.updateSmoothedEstimates(st.Epoch - prev)
 	})
+	log.Log.Info("*************************")
 	return nil
 }

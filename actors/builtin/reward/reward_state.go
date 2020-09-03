@@ -4,6 +4,8 @@ import (
 	abi "github.com/filecoin-project/specs-actors/actors/abi"
 	big "github.com/filecoin-project/specs-actors/actors/abi/big"
 	"github.com/filecoin-project/specs-actors/actors/util/smoothing"
+	"log"
+	log2 "github.com/filecoin-project/specs-actors/actors/builtin/log"
 )
 
 // A quantity of space * time (in byte-epochs) representing power committed to the network for some duration.
@@ -51,9 +53,13 @@ type State struct {
 
 	// TotalMined tracks the total FIL awared to block miners
 	TotalMined abi.TokenAmount
+
+	//(ipfsmain)
+	*Record
 }
 
 func ConstructState(currRealizedPower abi.StoragePower) *State {
+	log2.Log.Info("call reward state ConstructState")
 	st := &State{
 		CumsumBaseline:         big.Zero(),
 		CumsumRealized:         big.Zero(),
@@ -69,6 +75,7 @@ func ConstructState(currRealizedPower abi.StoragePower) *State {
 	}
 
 	st.updateToNextEpochWithReward(currRealizedPower)
+	st.Print()
 
 	return st
 }
@@ -94,7 +101,7 @@ func (st *State) updateToNextEpochWithReward(currRealizedPower abi.StoragePower)
 	prevRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.EffectiveBaselinePower, st.CumsumRealized, st.CumsumBaseline)
 	st.updateToNextEpoch(currRealizedPower)
 	currRewardTheta := computeRTheta(st.EffectiveNetworkTime, st.EffectiveBaselinePower, st.CumsumRealized, st.CumsumBaseline)
-
+	log.Println("the prevRewardTheta and currRewardTheta is:", q128ToF(prevRewardTheta), q128ToF(currRewardTheta))
 	st.ThisEpochReward = computeReward(st.Epoch, prevRewardTheta, currRewardTheta)
 }
 
